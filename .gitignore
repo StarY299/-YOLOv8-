@@ -1,0 +1,5 @@
+*.o
+*.so
+component_ai
+rtsp_test
+.vscode/
