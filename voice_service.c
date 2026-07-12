@@ -126,6 +126,7 @@ static void *tts_thread(void *arg)
 {
     (void)arg;
     char text[MAX_TEXT_LEN];
+    char wav_path[256];
     printf("[TTS] worker thread started\n");
 
     while (g_tts.running) {
@@ -159,7 +160,7 @@ static void *tts_thread(void *arg)
                                     audio->sample_rate, wav_path);
 
                 char cmd[512];
-                snprintf(cmd, sizeof(cmd), "aplay -q %s 2>/dev/null", wav_path);
+                snprintf(cmd, sizeof(cmd), "aplay -q -D plughw:0,0 %s 2>/dev/null", wav_path);
                 system(cmd);
 
                 /* 清理临时文件 */
@@ -175,7 +176,7 @@ static void *tts_thread(void *arg)
         /* 尝试播放对应文本的 WAV 文件 */
         char fallback[512];
         snprintf(fallback, sizeof(fallback),
-                 "aplay -q /userdata/voices/detect.wav 2>/dev/null");
+                 "aplay -q -D plughw:0,0 /userdata/voices/detect.wav 2>/dev/null");
         system(fallback);
 #endif
 
