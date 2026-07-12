@@ -128,7 +128,7 @@ const uint8_t *cv_branch_get_annotated_frame(size_t *out_size);
 /**
  * 获取元器件计数结果 (线程安全, 非阻塞)
  *
- * 在主循环中周期性调用, 用于 OLED 显示和语音播报.
+ * 在主循环中周期性调用, 用于 TFT 显示和语音播报.
  *
  * @param counts[12]   输出: 12 类元器件各自计数 (EMA 稳定后的整数值)
  * @param text_filter  输出: -1=无文字, 0=电阻模式, 1=电容模式, 2=二极管模式

@@ -1,9 +1,9 @@
 /**
- * main.c — RV1126B 电子元器件识别系统 (双线程 + AI分支)
+ * main.c — RV1126B 电子元器件识别系统
  *
  *   capture_thread ──► frame_queue ──► ai_feed_thread ──► cv_branch → RKNN NPU
- *
- * 精简自原烟雾检测系统，移除了 RTSP 推流、传感器、舵机等模块.
+ *   ├── http_server → 浏览器查看检测画面
+ *   └── LVGL + TFT → 1.8寸 SPI 屏实时计数
  */
 
 #include <stdio.h>
@@ -13,9 +13,11 @@
 #include <errno.h>
 #include <pthread.h>
 #include <string.h>
+#include <lvgl/lvgl.h>
 #include "capture.h"
 #include "ai_processor.h"
-#include "oled_display.h"
+#include "tft_display.h"
+#include "tft_ui.h"
 #include "voice_service.h"
 #include "http_server.h"
 
@@ -27,20 +29,16 @@
 #define CAP_FPS      30
 #define QUEUE_SIZE   4
 
+/* TFT 屏硬件 */
+#define TFT_SPI_DEV  "/dev/spidev2.0"   /* SPI 设备 (根据实际接线修改) */
+#define TFT_GPIO_DC  44                 /* DC 引脚 GPIO 编号 */
+#define TFT_GPIO_RST 43                 /* RST 引脚 GPIO 编号 */
+
 #define TTS_MODEL_DIR    "/userdata/tts/vits-icefall-zh-aishell3/"
 #define MODEL_PATH       "/userdata/components-i8.rknn"
 #define ANNOUNCE_INTERVAL 10   /* 语音播报间隔 (秒) */
 
 static volatile int running = 1;
-
-/* OLED 显示数据 (由 AI 回调更新) */
-static struct {
-    int   has_target;
-    int   class_id;
-    float confidence;
-} g_oled_detect;
-
-static pthread_mutex_t g_oled_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* ============================================================
  *  帧队列 (线程安全)
@@ -134,7 +132,6 @@ static void *ai_feed_thread(void *arg)
         queued_frame_t f;
         if (queue_get(&g_queue, &f) != 0) break;
 
-        /* 空帧过滤 */
         if (f.size < 256) {
             static int empty_streak = 0;
             empty_streak++;
@@ -144,7 +141,6 @@ static void *ai_feed_thread(void *arg)
             continue;
         }
 
-        /* 喂入 AI 处理分支 */
         cv_frame_t cvf;
         cvf.data         = f.data;
         cvf.size         = f.size;
@@ -169,12 +165,7 @@ static void *ai_feed_thread(void *arg)
 static void on_ai_result(const cv_result_t *result, void *user_data)
 {
     (void)user_data;
-    if (!result || result->count == 0) {
-        pthread_mutex_lock(&g_oled_lock);
-        g_oled_detect.has_target = 0;
-        pthread_mutex_unlock(&g_oled_lock);
-        return;
-    }
+    if (!result || result->count == 0) return;
 
     printf("[AI] frame %lld: %d detections, elapsed=%lld us\n",
            (long long)result->frame_id, result->count,
@@ -185,12 +176,6 @@ static void on_ai_result(const cv_result_t *result, void *user_data)
                d->class_id, d->label, d->confidence,
                d->x, d->y, d->w, d->h);
     }
-
-    pthread_mutex_lock(&g_oled_lock);
-    g_oled_detect.has_target = 1;
-    g_oled_detect.class_id   = result->detections[0].class_id;
-    g_oled_detect.confidence = result->detections[0].confidence;
-    pthread_mutex_unlock(&g_oled_lock);
 }
 
 /* ============================================================
@@ -223,7 +208,7 @@ int main(void)
         return -1;
     }
 
-    /* ---- 2. AI 分支 (元器件识别模型) ---- */
+    /* ---- 2. AI 分支 ---- */
     cv_branch_config_t cv_cfg = {
         .max_queue_size    = 2,
         .processing_width  = 0,
@@ -234,15 +219,19 @@ int main(void)
     };
     cv_branch_init(&cv_cfg);
 
-    /* ---- 3. OLED 显示屏 ---- */
-    oled_display_init();
+    /* ---- 3. TFT 显示屏 + LVGL ---- */
+    if (tft_display_init(TFT_SPI_DEV, TFT_GPIO_DC, TFT_GPIO_RST) != 0) {
+        fprintf(stderr, "WARN: TFT init failed\n");
+    } else {
+        tft_ui_init();
+    }
 
     /* ---- 4. TTS 语音引擎 ---- */
     if (tts_init(TTS_MODEL_DIR) != 0) {
         fprintf(stderr, "WARN: TTS init failed, continuing without voice\n");
     }
 
-    /* ---- 5. HTTP 推流 (浏览器查看检测画面) ---- */
+    /* ---- 5. HTTP 服务器 ---- */
     http_server_start(8080);
 
     /* ---- 6. 启动工作线程 ---- */
@@ -251,44 +240,53 @@ int main(void)
     pthread_create(&cap_tid,  NULL, capture_thread, NULL);
     pthread_create(&feed_tid, NULL, ai_feed_thread, NULL);
 
-    /* ---- 6. 系统就绪 ---- */
+    /* ---- 7. 系统就绪 ---- */
     printf("\n=== System Ready ===\n");
     tts_speak("元器件识别系统已就绪");
 
-    /* ---- 7. 主循环 (1秒 tick) ---- */
+    /* ---- 8. 主循环: 5ms LVGL 心跳 + 秒级定时任务 ---- */
     int64_t tick = 0;
+    int     ms   = 0;   /* 毫秒累加器 (用于秒级定时) */
+
     while (running) {
-        sleep(1);
-        tick++;
+        lv_task_handler();
+        lv_tick_inc(5);
+        usleep(5000);
+        ms += 5;
 
-        /* 每30秒打印统计 */
-        if (tick % 30 == 0) {
-            int64_t in, out, drop;
-            cv_branch_get_stats(&in, &out, &drop);
-            printf("[STATS] cv(in=%lld out=%lld drop=%lld)\n",
-                   (long long)in, (long long)out, (long long)drop);
-        }
+        /* 每 1 秒 */
+        if (ms >= 1000) {
+            ms = 0;
+            tick++;
 
-        /* 每2秒: OLED 刷新元器件计数 */
-        if (tick % 2 == 0) {
-            int counts[12], text_filter, has_damaged, has_unknown;
-            cv_branch_get_component_result(counts, &text_filter,
-                                            &has_damaged, &has_unknown);
-            oled_display_update_components(counts, text_filter,
-                                            has_damaged, has_unknown);
-        }
+            /* 每30秒打印统计 */
+            if (tick % 30 == 0) {
+                int64_t in, out, drop;
+                cv_branch_get_stats(&in, &out, &drop);
+                printf("[STATS] cv(in=%lld out=%lld drop=%lld)\n",
+                       (long long)in, (long long)out, (long long)drop);
+            }
 
-        /* 每10秒: 语音播报 */
-        if (tick % ANNOUNCE_INTERVAL == 0) {
-            int counts[12], text_filter, has_damaged, has_unknown;
-            cv_branch_get_component_result(counts, &text_filter,
-                                            &has_damaged, &has_unknown);
-            tts_announce_components(counts, text_filter,
-                                     has_damaged, has_unknown);
+            /* 每2秒: TFT 刷新计数 */
+            if (tick % 2 == 0) {
+                int counts[12], text_filter, has_damaged, has_unknown;
+                cv_branch_get_component_result(counts, &text_filter,
+                                                &has_damaged, &has_unknown);
+                tft_ui_update(counts, text_filter, has_damaged, has_unknown);
+            }
+
+            /* 每10秒: 语音播报 */
+            if (tick % ANNOUNCE_INTERVAL == 0) {
+                int counts[12], text_filter, has_damaged, has_unknown;
+                cv_branch_get_component_result(counts, &text_filter,
+                                                &has_damaged, &has_unknown);
+                tts_announce_components(counts, text_filter,
+                                         has_damaged, has_unknown);
+            }
         }
     }
 
-    /* ---- 8. 清理 ---- */
+    /* ---- 9. 清理 ---- */
     printf("\n=== Shutting down ===\n");
     http_server_stop();
     tts_deinit();
@@ -296,7 +294,7 @@ int main(void)
     pthread_join(cap_tid,  NULL);
     pthread_join(feed_tid, NULL);
     cv_branch_deinit();
-    oled_display_deinit();
+    tft_display_deinit();
     capture_deinit();
     printf("=== Done ===\n");
     return 0;

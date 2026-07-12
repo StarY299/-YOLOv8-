@@ -22,15 +22,21 @@ TTS_CFLAGS  = -I$(TTS_DIR)/include -DHAS_SHERPA_ONNX
 TTS_LIBS    = -L$(TTS_DIR)/lib -lsherpa-onnx -lonnxruntime
 
 # 源文件
-CSRCS    = main.c capture.c oled.c font.c oled_display.c voice_service.c http_server.c
+CSRCS    = main.c capture.c voice_service.c http_server.c \
+           tft_display.c tft_ui.c
 CXXSRCS  = ai_processor.c rknn_infer.c
 OBJS     = $(CSRCS:.c=.o) ai_processor.o rknn_infer.o
 
+# LVGL 头文件路径
+LVGL_CFLAGS = $(shell pkg-config --cflags lvgl 2>/dev/null)
+LVGL_LIBS   = $(shell pkg-config --libs   lvgl 2>/dev/null)
+
 # 编译选项
-CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(RKNN_CFLAGS) $(TTS_CFLAGS)
-CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(CV_CFLAGS) $(RKNN_CFLAGS) $(TTS_CFLAGS) \
+CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(RKNN_CFLAGS) $(TTS_CFLAGS) $(LVGL_CFLAGS)
+CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(CV_CFLAGS) $(RKNN_CFLAGS) $(TTS_CFLAGS) $(LVGL_CFLAGS) \
            -DCV_BRANCH_HAS_OPENCV
-LDFLAGS  = -pthread $(CV_LIBS) $(RKNN_LIBS) $(TTS_LIBS) -lrga -lrockchip_mpp -lm
+LDFLAGS  = -pthread $(CV_LIBS) $(RKNN_LIBS) $(TTS_LIBS) $(LVGL_LIBS) \
+           -lrga -lrockchip_mpp -lm
 
 all: $(TARGET)
 
