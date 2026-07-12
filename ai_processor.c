@@ -136,26 +136,28 @@ static void update_component_counts(const rknn_detection_t *dets, int n, int img
     if (g_cc.frame_cnt % 30 == 0)
         g_cc.text_filter = detect_text_filter(dets, n, img_h);
 
-    /* 缺损标志: 锁存机制, 检测到后保持至少 5 秒 (150 帧) */
-    int damaged_now = (g_cc.ema_counts[CLS_C_DAMAGED] > 0.5f ||
-                        g_cc.ema_counts[CLS_R_DAMAGED] > 0.5f ||
-                        g_cc.ema_counts[CLS_D_DAMAGED] > 0.5f) ? 1 : 0;
-    static int damaged_cooldown = 0;
-    if (damaged_now) {
-        g_cc.has_damaged = 1;
-        damaged_cooldown = 150;  /* 5秒 @30fps */
-    } else if (damaged_cooldown > 0) {
-        damaged_cooldown--;
-    } else {
-        g_cc.has_damaged = 0;
+    /* 缺损标志: 5秒窗口内>30%帧有缺损 → 触发 (150帧窗口, >45帧) */
+    #define DAM_WINDOW 150
+    static int dam_hist[DAM_WINDOW] = {0};
+    static int dam_idx = 0, dam_cnt = 0;
+    int damaged_now = (raw[CLS_C_DAMAGED] > 0 || raw[CLS_R_DAMAGED] > 0 ||
+                       raw[CLS_D_DAMAGED] > 0) ? 1 : 0;
+    /* 滑动窗口: 减去旧值, 加新值 */
+    dam_cnt -= dam_hist[dam_idx];
+    dam_hist[dam_idx] = damaged_now;
+    dam_cnt += damaged_now;
+    dam_idx = (dam_idx + 1) % DAM_WINDOW;
+    g_cc.has_damaged = (dam_cnt > DAM_WINDOW * 20 / 100) ? 1 : 0;  /* >20% */
+
+    /* 强置缺损计数: 窗口内>30%的类设为至少1 */
+    if (g_cc.has_damaged) {
+        if (g_cc.stable_counts[CLS_C_DAMAGED] <= 0 &&
+            g_cc.ema_counts[CLS_C_DAMAGED] > 0.2f) g_cc.stable_counts[CLS_C_DAMAGED] = 1;
+        if (g_cc.stable_counts[CLS_R_DAMAGED] <= 0 &&
+            g_cc.ema_counts[CLS_R_DAMAGED] > 0.2f) g_cc.stable_counts[CLS_R_DAMAGED] = 1;
+        if (g_cc.stable_counts[CLS_D_DAMAGED] <= 0 &&
+            g_cc.ema_counts[CLS_D_DAMAGED] > 0.2f) g_cc.stable_counts[CLS_D_DAMAGED] = 1;
     }
-    /* 强置缺损计数: 仅对 EMA>0.5 的类设为至少1 */
-    if (g_cc.ema_counts[CLS_C_DAMAGED] > 0.5f && g_cc.stable_counts[CLS_C_DAMAGED] <= 0)
-        g_cc.stable_counts[CLS_C_DAMAGED] = 1;
-    if (g_cc.ema_counts[CLS_R_DAMAGED] > 0.5f && g_cc.stable_counts[CLS_R_DAMAGED] <= 0)
-        g_cc.stable_counts[CLS_R_DAMAGED] = 1;
-    if (g_cc.ema_counts[CLS_D_DAMAGED] > 0.5f && g_cc.stable_counts[CLS_D_DAMAGED] <= 0)
-        g_cc.stable_counts[CLS_D_DAMAGED] = 1;
     g_cc.has_unknown = 0;
 
     if (g_cc.frame_cnt % 50 == 0) {
