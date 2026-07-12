@@ -31,7 +31,7 @@ static int            g_listen_fd = -1;
 
 /* ---- 简单的 HTTP 响应构建 ---- */
 
-/* 首页 HTML: 自动刷新显示 MJPEG 流 */
+/* ---- 首页 HTML: 视频流 + 实时计数面板 ---- */
 static const char *g_index_html =
     "HTTP/1.1 200 OK\r\n"
     "Content-Type: text/html; charset=utf-8\r\n"
@@ -39,13 +39,57 @@ static const char *g_index_html =
     "\r\n"
     "<!DOCTYPE html>\n"
     "<html><head>\n"
-    "<title>Component AI</title>\n"
     "<meta charset='utf-8'>\n"
-    "<style>body{margin:0;background:#000;display:flex;"
-    "justify-content:center;align-items:center;min-height:100vh;}"
-    "img{max-width:100%;max-height:100vh;}</style>\n"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>\n"
+    "<title>Component AI</title>\n"
+    "<style>\n"
+    "*{margin:0;padding:0;box-sizing:border-box}\n"
+    "body{background:#111;font:14px monospace;color:#fff;display:flex;flex-direction:column;height:100vh}\n"
+    "#video{flex:1;display:flex;justify-content:center;align-items:center;overflow:hidden}\n"
+    "#video img{max-width:100%;max-height:100%}\n"
+    "#panel{display:flex;gap:8px;padding:8px 12px;background:#1a1a2e;flex-wrap:wrap;align-items:center;"
+    "border-top:2px solid #333}\n"
+    ".item{padding:4px 10px;border-radius:4px;background:#222;text-align:center;min-width:56px}\n"
+    ".item .n{font-size:22px;font-weight:bold}\n"
+    ".item .l{font-size:10px;color:#aaa}\n"
+    ".badge{padding:4px 10px;border-radius:4px;font-weight:bold;font-size:13px}\n"
+    ".badge.warn{background:#600;color:#f88}\n"
+    ".badge.info{background:#660;color:#ff8}\n"
+    ".badge.ok{background:#060;color:#8f8}\n"
+    ".filter{background:#224;padding:4px 10px;border-radius:4px;font-size:12px;color:#8af}\n"
+    "</style>\n"
     "</head><body>\n"
-    "<img src='/stream'>\n"
+    "<div id='video'><img src='/stream'></div>\n"
+    "<div id='panel'>\n"
+    "<div class='item'><div class='n' id='c0'>-</div><div class='l'>电阻</div></div>\n"
+    "<div class='item'><div class='n' id='c1'>-</div><div class='l'>电容</div></div>\n"
+    "<div class='item'><div class='n' id='c2'>-</div><div class='l'>二极管</div></div>\n"
+    "<div class='item'><div class='n' id='c3'>-</div><div class='l'>电感</div></div>\n"
+    "<div class='item'><div class='n' id='c4'>-</div><div class='l'>LED</div></div>\n"
+    "<div class='item'><div class='n' id='c5'>-</div><div class='l'>IC芯片</div></div>\n"
+    "<span id='damaged'></span>\n"
+    "<span id='unknown'></span>\n"
+    "<span id='filter'></span>\n"
+    "</div>\n"
+    "<script>\n"
+    "const names=['电阻','电容','二极管','电感','LED','IC芯片'];\n"
+    "const colors=['#4f4','#48f','#f44','#ff4','#f4f','#f84'];\n"
+    "async function poll(){\n"
+    "try{\n"
+    "let r=await fetch('/api/status');\n"
+    "let d=await r.json();\n"
+    "for(let i=0;i<6;i++){document.getElementById('c'+i).textContent=d.counts[i]||0;}\n"
+    "let db=document.getElementById('damaged');\n"
+    "db.innerHTML=d.has_damaged?'<span class=\"badge warn\">缺损!</span>':'';\n"
+    "let ub=document.getElementById('unknown');\n"
+    "ub.innerHTML=d.has_unknown?'<span class=\"badge info\">未知:'+d.counts[7]+'</span>':'';\n"
+    "let fb=document.getElementById('filter');\n"
+    "let fnames=['电阻','电容','二极管'];\n"
+    "fb.innerHTML=d.text_filter>=0?'<span class=\"filter\">仅统计:'+fnames[d.text_filter]+'</span>':'';\n"
+    "}catch(e){}\n"
+    "}\n"
+    "setInterval(poll,1000);poll();\n"
+    "</script>\n"
     "</body></html>\n";
 
 /* ---- MJPEG 流 ---- */
@@ -113,6 +157,32 @@ static void send_snapshot(int client_fd)
     }
 }
 
+/* ---- JSON API: 实时计数 ---- */
+static void send_api_status(int client_fd)
+{
+    int counts[12], text_filter, has_damaged, has_unknown;
+    cv_branch_get_component_result(counts, &text_filter,
+                                    &has_damaged, &has_unknown);
+
+    char json[1024];
+    snprintf(json, sizeof(json),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json; charset=utf-8\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "{"
+        "\"counts\":[%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d],"
+        "\"text_filter\":%d,"
+        "\"has_damaged\":%d,"
+        "\"has_unknown\":%d"
+        "}",
+        counts[0],counts[1],counts[2],counts[3],counts[4],counts[5],
+        counts[6],counts[7],counts[8],counts[9],counts[10],counts[11],
+        text_filter, has_damaged, has_unknown);
+    send(client_fd, json, strlen(json), MSG_NOSIGNAL);
+}
+
 /* ---- 请求路由 ---- */
 static void handle_client(int client_fd)
 {
@@ -131,6 +201,8 @@ static void handle_client(int client_fd)
         send_mjpeg(client_fd);
     } else if (strcmp(path, "/snapshot") == 0) {
         send_snapshot(client_fd);
+    } else if (strcmp(path, "/api/status") == 0) {
+        send_api_status(client_fd);
     } else {
         const char *nf = "HTTP/1.1 404 Not Found\r\n\r\n";
         send(client_fd, nf, strlen(nf), MSG_NOSIGNAL);
