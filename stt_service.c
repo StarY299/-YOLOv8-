@@ -33,7 +33,7 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef HAS_SHERPA_ONNX
 static const SherpaOnnxOnlineRecognizer *g_recognizer = NULL;
-static SherpaOnnxOnlineStream          *g_stream = NULL;
+static const SherpaOnnxOnlineStream    *g_stream = NULL;
 #endif
 
 /* ---- 后台线程: 采集 + 识别 ---- */
@@ -56,13 +56,13 @@ static void *stt_thread(void *arg)
 
         /* 喂给流式识别器 */
         SherpaOnnxOnlineStreamAcceptWaveform(g_stream, AUDIO_RATE, buf, n);
-        while (SherpaOnnxIsOnlineStreamReady(g_stream)) {
-            SherpaOnnxDecodeOnlineStream(g_stream);
+        while (SherpaOnnxIsOnlineStreamReady(g_recognizer, g_stream)) {
+            SherpaOnnxDecodeOnlineStream(g_recognizer, g_stream);
         }
 
         /* 获取结果 */
         const SherpaOnnxOnlineRecognizerResult *r =
-            SherpaOnnxGetOnlineStreamResult(g_stream);
+            SherpaOnnxGetOnlineStreamResult(g_recognizer, g_stream);
         if (r && r->text && r->text[0] && strcmp(r->text, last_text)) {
             strncpy(last_text, r->text, TEXT_BUF_SZ - 1);
             pthread_mutex_lock(&g_lock);
@@ -86,29 +86,33 @@ static void *stt_thread(void *arg)
 int stt_init(void)
 {
     if (g_running) return -1;
+    /* STT 暂时跳过: sherpa-onnx streaming ASR 模型配置需进一步调试 */
+    fprintf(stderr, "[STT] skipped (model config WIP)\n");
+    return -1;
 
+#if 0 /* WIP: sherpa-onnx zipformer CTC config */
 #ifdef HAS_SHERPA_ONNX
     SherpaOnnxOnlineRecognizerConfig cfg;
     memset(&cfg, 0, sizeof(cfg));
 
+    cfg.feat_config.sample_rate = 16000;
+    cfg.feat_config.feature_dim = 80;
     cfg.model_config.debug = 0;
     cfg.model_config.num_threads = 2;
     cfg.model_config.provider = "cpu";
 
-    /* 设置 zipformer2 CTC 模型路径 */
+    /* Zipformer2 CTC 模型 */
     char path[256];
     snprintf(path, sizeof(path), "%s/model.int8.onnx", STT_MODEL_DIR);
-    cfg.model_config.transducer.encoder = path;
-    snprintf(path, sizeof(path), "%s/model.int8.onnx", STT_MODEL_DIR);
-    cfg.model_config.transducer.decoder = path;
-    snprintf(path, sizeof(path), "%s/model.int8.onnx", STT_MODEL_DIR);
-    cfg.model_config.transducer.joiner = path;
+    cfg.model_config.zipformer2_ctc.model = path;
 
-    /* tokens */
+    cfg.model_config.modeling_unit = "bpe";
     snprintf(path, sizeof(path), "%s/tokens.txt", STT_MODEL_DIR);
     cfg.model_config.tokens = path;
-    cfg.model_config.tokens_buf = NULL;
-    cfg.model_config.tokens_size = 0;
+    snprintf(path, sizeof(path), "%s/bbpe.model", STT_MODEL_DIR);
+    cfg.model_config.bpe_vocab = path;
+
+    cfg.decoding_method = "greedy_search";
 
     printf("[STT] loading model from %s...\n", STT_MODEL_DIR);
     g_recognizer = SherpaOnnxCreateOnlineRecognizer(&cfg);
@@ -123,7 +127,8 @@ int stt_init(void)
         return -1;
     }
     printf("[STT] model loaded OK\n");
-#endif
+#endif /* HAS_SHERPA_ONNX */
+#endif /* 0 — WIP */
 
     g_running = 1;
     if (pthread_create(&g_thread, NULL, stt_thread, NULL) != 0) {

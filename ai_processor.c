@@ -34,7 +34,7 @@
 #define TEXT_ROI_H       0.25f /* 文字检测 ROI: 图像上方 25% */
 #define EMA_ALPHA        0.3f  /* EMA 平滑系数 */
 #define TEXT_CONF_MIN    0.50f /* 文字检测最低置信度 */
-#define DET_CONF_MIN     0.50f /* 元件检测最低置信度 */
+#define DET_CONF_MIN     0.25f /* 与缺损类最低阈值对齐 */
 
 /* 类别索引 (匹配模型输出: 0=Capacitor 1=Diode 2=Transistor 3=Resister 4=LED
  *                       5=C-dam 6=R-dam 7=text_R 8=text_C 9=text_D 10=D-dam) */
@@ -136,12 +136,35 @@ static void update_component_counts(const rknn_detection_t *dets, int n, int img
     if (g_cc.frame_cnt % 30 == 0)
         g_cc.text_filter = detect_text_filter(dets, n, img_h);
 
-    /* 缺损/未知标志 */
-    g_cc.has_damaged = (g_cc.stable_counts[CLS_C_DAMAGED] > 0 ||
-                         g_cc.stable_counts[CLS_R_DAMAGED] > 0 ||
-                         g_cc.stable_counts[CLS_D_DAMAGED] > 0) ? 1 : 0;
-    g_cc.has_unknown = 0;  /* 当前模型无未知元件类 */
+    /* 缺损标志: 锁存机制, 检测到后保持至少 5 秒 (150 帧) */
+    int damaged_now = (g_cc.ema_counts[CLS_C_DAMAGED] > 0.5f ||
+                        g_cc.ema_counts[CLS_R_DAMAGED] > 0.5f ||
+                        g_cc.ema_counts[CLS_D_DAMAGED] > 0.5f) ? 1 : 0;
+    static int damaged_cooldown = 0;
+    if (damaged_now) {
+        g_cc.has_damaged = 1;
+        damaged_cooldown = 150;  /* 5秒 @30fps */
+    } else if (damaged_cooldown > 0) {
+        damaged_cooldown--;
+    } else {
+        g_cc.has_damaged = 0;
+    }
+    /* 强置缺损计数: 仅对 EMA>0.5 的类设为至少1 */
+    if (g_cc.ema_counts[CLS_C_DAMAGED] > 0.5f && g_cc.stable_counts[CLS_C_DAMAGED] <= 0)
+        g_cc.stable_counts[CLS_C_DAMAGED] = 1;
+    if (g_cc.ema_counts[CLS_R_DAMAGED] > 0.5f && g_cc.stable_counts[CLS_R_DAMAGED] <= 0)
+        g_cc.stable_counts[CLS_R_DAMAGED] = 1;
+    if (g_cc.ema_counts[CLS_D_DAMAGED] > 0.5f && g_cc.stable_counts[CLS_D_DAMAGED] <= 0)
+        g_cc.stable_counts[CLS_D_DAMAGED] = 1;
+    g_cc.has_unknown = 0;
 
+    if (g_cc.frame_cnt % 50 == 0) {
+        fprintf(stderr, "[COUNT] raw[R=%d C=%d D=%d dam=%d,%d,%d] ema[dam=%.2f,%.2f,%.2f] has_dam=%d\n",
+                (int)raw[3], (int)raw[0], (int)raw[1],
+                (int)raw[6], (int)raw[5], (int)raw[10],
+                g_cc.ema_counts[6], g_cc.ema_counts[5], g_cc.ema_counts[10],
+                g_cc.has_damaged);
+    }
     g_cc.frame_cnt++;
     pthread_mutex_unlock(&g_cc.lock);
 }
@@ -152,15 +175,8 @@ void cv_branch_get_component_result(int counts[12], int *text_filter,
 {
     pthread_mutex_lock(&g_cc.lock);
 
-    /* 映射: model_class → display_index
-     * model: 0=C 1=D 2=T 3=R 4=LED 5=C-dam 6=R-dam 7=text_R 8=text_C 9=text_D 10=D-dam
-     * display: 0=R 1=C 2=D 3=T 4=LED 5=IC(未使用) */
-    static const int mdl2disp[11] = {1, 2, 3, 0, 4, -1, -1, -1, -1, -1, -1};
-    memset(counts, 0, sizeof(int) * 12);
-    for (int m = 0; m < 11; m++) {
-        int d = mdl2disp[m];
-        if (d >= 0) counts[d] = g_cc.stable_counts[m];
-    }
+    /* 直接返回原始模型计数 (12类) */
+    memcpy(counts, g_cc.stable_counts, sizeof(int) * 12);
 
     if (text_filter) *text_filter = g_cc.text_filter;
     if (has_damaged) *has_damaged = g_cc.has_damaged;
