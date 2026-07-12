@@ -1,6 +1,5 @@
 # ============================================================
 #  RV1126B Component Recognition — On-Board Makefile
-#  (精简版: 无RTSP推流, 无传感器/舵机/TCP模块)
 # ============================================================
 
 CC  = gcc
@@ -12,28 +11,23 @@ TARGET = component_ai
 CV_CFLAGS   = $(shell pkg-config --cflags opencv4)
 CV_LIBS     = $(shell pkg-config --libs   opencv4)
 
-# RKNN (头文件在当前目录, .so 在系统 /usr/lib)
+# RKNN
 RKNN_CFLAGS = -I.
 RKNN_LIBS   = -L/usr/lib -lrknnrt -ldl
 
-# WAV 拼接语音 (预录制文件在 /userdata/tts/wavs/)
+# LCD (GPIO via /dev/gpiochip5, SPI via /dev/spidev)
 
 # 源文件
 CSRCS    = main.c capture.c voice_service.c http_server.c \
-           tft_display.c tft_ui.c
+           tft_display.c tft_ui.c lcd.c zk.c
 CXXSRCS  = ai_processor.c rknn_infer.c
 OBJS     = $(CSRCS:.c=.o) ai_processor.o rknn_infer.o
 
-# LVGL (源码编译安装到 /usr/local)
-# -DLV_CONF_INCLUDE_SIMPLE 让 LVGL include "lv_conf.h" (从 -I. 找到我们的)
-LVGL_CFLAGS = -DLV_CONF_INCLUDE_SIMPLE -I. -I/usr/local/include
-LVGL_LIBS   = -L/usr/local/lib -llvgl
-
 # 编译选项
-CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(RKNN_CFLAGS) $(LVGL_CFLAGS)
-CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(CV_CFLAGS) $(RKNN_CFLAGS) $(LVGL_CFLAGS) \
+CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(RKNN_CFLAGS)
+CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(CV_CFLAGS) $(RKNN_CFLAGS) \
            -DCV_BRANCH_HAS_OPENCV
-LDFLAGS  = -pthread $(CV_LIBS) $(RKNN_LIBS) $(LVGL_LIBS) \
+LDFLAGS  = -pthread $(CV_LIBS) $(RKNN_LIBS) \
            -lrga -lrockchip_mpp -lm
 
 all: $(TARGET)
@@ -41,15 +35,12 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CXX) $(OBJS) -o $(TARGET) $(LDFLAGS)
 
-# C 源文件
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# ai_processor.o 用 g++ (OpenCV C++ 头文件)
 ai_processor.o: ai_processor.c ai_processor.h rknn_infer.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# rknn_infer.o 用 g++ (OpenCV C++ 预处理优化)
 rknn_infer.o: rknn_infer.c rknn_infer.h rknn_api.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
