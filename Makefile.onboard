@@ -1,6 +1,6 @@
 # ============================================================
 #  RV1126B Component Recognition — On-Board Makefile
-#  (精简自烟雾检测系统, 移除传感器/舵机/TCP模块)
+#  (精简版: 无RTSP推流, 无传感器/舵机/TCP模块)
 # ============================================================
 
 CC  = gcc
@@ -8,9 +8,7 @@ CXX = g++
 
 TARGET = component_ai
 
-# 库路径 (pkg-config)
-GST_CFLAGS  = $(shell pkg-config --cflags gstreamer-1.0 gstreamer-app-1.0 gstreamer-base-1.0)
-GST_LIBS    = $(shell pkg-config --libs   gstreamer-1.0 gstreamer-app-1.0 gstreamer-base-1.0)
+# OpenCV4
 CV_CFLAGS   = $(shell pkg-config --cflags opencv4)
 CV_LIBS     = $(shell pkg-config --libs   opencv4)
 
@@ -23,17 +21,16 @@ TTS_DIR     = /userdata/tts
 TTS_CFLAGS  = -I$(TTS_DIR)/include -DHAS_SHERPA_ONNX
 TTS_LIBS    = -L$(TTS_DIR)/lib -lsherpa-onnx -lonnxruntime
 
-# 源文件 — 精简版 (移除了 sensor, servo, tracker, tcp_server, fifo_rx, audio_receiver, uart, pca9685, recorder)
-CSRCS    = main.c capture.c rtsp_service.c rtsp_stream.c \
-           oled.c font.c oled_display.c voice_service.c
+# 源文件
+CSRCS    = main.c capture.c oled.c font.c oled_display.c voice_service.c
 CXXSRCS  = ai_processor.c rknn_infer.c
 OBJS     = $(CSRCS:.c=.o) ai_processor.o rknn_infer.o
 
 # 编译选项
-CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(GST_CFLAGS) $(RKNN_CFLAGS) $(TTS_CFLAGS)
-CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(GST_CFLAGS) $(CV_CFLAGS) $(RKNN_CFLAGS) $(TTS_CFLAGS) \
+CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(RKNN_CFLAGS) $(TTS_CFLAGS)
+CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(CV_CFLAGS) $(RKNN_CFLAGS) $(TTS_CFLAGS) \
            -DCV_BRANCH_HAS_OPENCV
-LDFLAGS  = -pthread $(GST_LIBS) $(CV_LIBS) $(RKNN_LIBS) $(TTS_LIBS) -lrga -lrockchip_mpp -lm
+LDFLAGS  = -pthread $(CV_LIBS) $(RKNN_LIBS) $(TTS_LIBS) -lrga -lrockchip_mpp -lm
 
 all: $(TARGET)
 
@@ -51,7 +48,6 @@ ai_processor.o: ai_processor.c ai_processor.h rknn_infer.h
 # rknn_infer.o 用 g++ (OpenCV C++ 预处理优化)
 rknn_infer.o: rknn_infer.c rknn_infer.h rknn_api.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
-
 
 clean:
 	rm -f $(OBJS) $(TARGET)

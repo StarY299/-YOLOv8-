@@ -12,7 +12,6 @@
  *  设计:
  *    - 基于 V4L2 ioctl + mmap，4 个缓冲区低延迟轮转
  *    - 输出原始 MJPEG 压缩帧，交给下游:
- *        GStreamer → 硬件 mppjpegdec 解码 → 推流
  *        cv_branch → OpenCV imdecode 软解 → AI 推理
  *    - 采集线程阻塞在 dequeue，不浪费 CPU
  * ============================================================ */

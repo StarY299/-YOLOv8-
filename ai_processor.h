@@ -7,9 +7,8 @@
 /* ============================================================
  *  cv_branch — OpenCV AI 数据分支
  *
- *  与 GStreamer 推流管线并行运行：
- *    USB Camera → V4L2 ─┬── GStreamer Pipeline → RTSP 推流 (原有)
- *                        └── cv_branch → OpenCV AI 处理   (新增)
+ *  与主线程并行运行：
+ *    USB Camera → V4L2 → ai_feed_thread → cv_branch → OpenCV AI 处理
  *
  *  设计要点:
  *    - 独立的处理线程，不阻塞主采集/推流管线
@@ -117,8 +116,8 @@ void cv_branch_get_stats(int64_t *total_in, int64_t *total_out, int64_t *total_d
 /**
  * 获取最近一次 AI 处理后的标注 JPEG 帧 (线程安全, 非阻塞)
  *
- * 在 GStreamer 推流前调用: 如果 AI 产出了标注帧就推标注帧, 否则推原始帧.
- * 这样 RTSP 拉流就能看到检测框.
+ * 获取 AI 处理后的标注 JPEG 帧 (带检测框).
+ * 可用于外部显示或保存.
  *
  * @param out_size  输出 JPEG 数据长度 (仅当返回值非 NULL 时有效)
  * @return JPEG 数据指针 (cv_branch 内部管理, 调用方不应 free),

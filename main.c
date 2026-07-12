@@ -1,11 +1,9 @@
 /**
- * main.c — RV1126B 电子元器件识别系统 (三线程架构)
+ * main.c — RV1126B 电子元器件识别系统 (双线程 + AI分支)
  *
- *   capture_thread ──► frame_queue ──► push_thread ──► GStreamer → RTSP
- *                          │
- *                          └──────► ai_thread (cv_branch) → RKNN NPU → 元器件计数
+ *   capture_thread ──► frame_queue ──► ai_feed_thread ──► cv_branch → RKNN NPU
  *
- * 改造自烟雾/火焰检测系统，移除了传感器、舵机追踪、TCP坐标发送等模块.
+ * 精简自原烟雾检测系统，移除了 RTSP 推流、传感器、舵机等模块.
  */
 
 #include <stdio.h>
@@ -15,9 +13,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <string.h>
-#include "rtsp_service.h"
 #include "capture.h"
-#include "rtsp_stream.h"
 #include "ai_processor.h"
 #include "oled_display.h"
 #include "voice_service.h"
@@ -28,7 +24,6 @@
 #define CAP_WIDTH    1920
 #define CAP_HEIGHT   1080
 #define CAP_FPS      30
-#define H264_BITRATE 4000000
 #define QUEUE_SIZE   4
 
 #define TTS_MODEL_DIR    "/userdata/tts/vits-icefall-zh-aishell3/"
@@ -36,14 +31,6 @@
 #define ANNOUNCE_INTERVAL 10   /* 语音播报间隔 (秒) */
 
 static volatile int running = 1;
-static volatile int g_first_valid_frame = 0;
-static pthread_mutex_t g_start_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t  g_start_cond = PTHREAD_COND_INITIALIZER;
-
-/* 标注帧缓存 — 720p带检测框, 推送用 */
-static uint8_t        *g_anno_buf = NULL;
-static size_t          g_anno_len = 0;
-static pthread_mutex_t g_anno_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* OLED 显示数据 (由 AI 回调更新) */
 static struct {
@@ -113,7 +100,7 @@ static int queue_get(frame_queue_t *q, queued_frame_t *out)
 }
 
 /* ============================================================
- *  线程 1: 采集
+ *  线程 1: 摄像头采集
  * ============================================================ */
 static void *capture_thread(void *arg)
 {
@@ -135,71 +122,28 @@ static void *capture_thread(void *arg)
 }
 
 /* ============================================================
- *  线程 2: 推流 (MJPEG → RTSP, 同时喂 AI 分支)
+ *  线程 2: AI 帧喂入
  * ============================================================ */
-static void *push_thread(void *arg)
+static void *ai_feed_thread(void *arg)
 {
     (void)arg;
-    printf("[THREAD] push started\n");
+    printf("[THREAD] ai_feed started\n");
 
     while (running) {
         queued_frame_t f;
         if (queue_get(&g_queue, &f) != 0) break;
 
         /* 空帧过滤 */
-        {
+        if (f.size < 256) {
             static int empty_streak = 0;
-            if (f.size < 256) {
-                empty_streak++;
-                if (empty_streak % 100 == 1)
-                    printf("[PUSH] skip empty frame streak=%d\n", empty_streak);
-                free(f.data);
-                continue;
-            }
-            if (empty_streak > 90) {
-                printf("[PUSH] frame recovered after %d empty, restarting mediamtx\n", empty_streak);
-                system("killall -9 mediamtx 2>/dev/null; sleep 1; "
-                       "/userdata/mediamtx /userdata/mediamtx.yml &");
-                printf("[PUSH] mediamtx restarted\n");
-            }
-            empty_streak = 0;
+            empty_streak++;
+            if (empty_streak % 100 == 1)
+                printf("[FEED] skip empty frame streak=%d\n", empty_streak);
+            free(f.data);
+            continue;
         }
 
-        /* 更新标注帧缓存 (720p带框) */
-        {
-            size_t ns = 0;
-            const uint8_t *nd = cv_branch_get_annotated_frame(&ns);
-            if (nd && ns > 256) {
-                pthread_mutex_lock(&g_anno_lock);
-                free(g_anno_buf);
-                g_anno_buf = (uint8_t *)malloc(ns);
-                if (g_anno_buf) { memcpy(g_anno_buf, nd, ns); g_anno_len = ns; }
-                else g_anno_len = 0;
-                pthread_mutex_unlock(&g_anno_lock);
-            }
-        }
-        /* 推送标注帧 (720p带框), 无缓存时回退原始帧 */
-        {
-            int pushed = 0;
-            pthread_mutex_lock(&g_anno_lock);
-            if (g_anno_buf && g_anno_len > 256) {
-                gst_pipeline_push_frame(g_anno_buf, g_anno_len, f.frame_id);
-                pushed = 1;
-            }
-            pthread_mutex_unlock(&g_anno_lock);
-            if (!pushed)
-                gst_pipeline_push_frame(f.data, f.size, f.frame_id);
-        }
-
-        /* 通知main线程: 第一帧有效数据已进入管线 */
-        if (!g_first_valid_frame) {
-            pthread_mutex_lock(&g_start_lock);
-            g_first_valid_frame = 1;
-            pthread_cond_signal(&g_start_cond);
-            pthread_mutex_unlock(&g_start_lock);
-        }
-
-        /* 同时喂给 AI 分支 */
+        /* 喂入 AI 处理分支 */
         cv_frame_t cvf;
         cvf.data         = f.data;
         cvf.size         = f.size;
@@ -214,7 +158,7 @@ static void *push_thread(void *arg)
         free(f.data);
     }
 
-    printf("[THREAD] push stopped\n");
+    printf("[THREAD] ai_feed stopped\n");
     return NULL;
 }
 
@@ -241,7 +185,6 @@ static void on_ai_result(const cv_result_t *result, void *user_data)
                d->x, d->y, d->w, d->h);
     }
 
-    /* 更新 OLED 检测指示 */
     pthread_mutex_lock(&g_oled_lock);
     g_oled_detect.has_target = 1;
     g_oled_detect.class_id   = result->detections[0].class_id;
@@ -250,7 +193,7 @@ static void on_ai_result(const cv_result_t *result, void *user_data)
 }
 
 /* ============================================================
- *  信号
+ *  信号处理
  * ============================================================ */
 static void sig_handler(int sig)
 {
@@ -268,7 +211,7 @@ int main(void)
     signal(SIGTERM, sig_handler);
     signal(SIGINT,  sig_handler);
 
-    /* ---- 1. V4L2 自动查找摄像头 ---- */
+    /* ---- 1. V4L2 摄像头 ---- */
     char cap_device[128];
     if (capture_find_device(cap_device, sizeof(cap_device)) != 0) {
         fprintf(stderr, "FATAL: USB camera not found\n");
@@ -279,62 +222,37 @@ int main(void)
         return -1;
     }
 
-    /* ---- 2. GStreamer RTSP 推流管线 ---- */
-    if (gst_pipeline_init(CAP_WIDTH, CAP_HEIGHT, CAP_FPS, H264_BITRATE) != 0) {
-        capture_deinit(); return -1;
-    }
-
-    /* ---- 3. AI 分支 (元器件识别模型) ---- */
+    /* ---- 2. AI 分支 (元器件识别模型) ---- */
     cv_branch_config_t cv_cfg = {
         .max_queue_size    = 2,
         .processing_width  = 0,
         .processing_height = 0,
         .on_result         = on_ai_result,
         .user_data         = NULL,
-        .model_path        = MODEL_PATH,   /* /userdata/components-i8.rknn */
+        .model_path        = MODEL_PATH,
     };
     cv_branch_init(&cv_cfg);
 
-    /* ---- 4. OLED 显示屏 ---- */
+    /* ---- 3. OLED 显示屏 ---- */
     oled_display_init();
 
-    /* ---- 5. TTS 语音引擎 (sherpa-onnx) ---- */
+    /* ---- 4. TTS 语音引擎 ---- */
     if (tts_init(TTS_MODEL_DIR) != 0) {
         fprintf(stderr, "WARN: TTS init failed, continuing without voice\n");
     }
 
-    /* ---- 6. 启动工作线程 ---- */
+    /* ---- 5. 启动工作线程 ---- */
     queue_init(&g_queue);
-    pthread_t cap_tid, push_tid;
+    pthread_t cap_tid, feed_tid;
     pthread_create(&cap_tid,  NULL, capture_thread, NULL);
-    pthread_create(&push_tid, NULL, push_thread,    NULL);
+    pthread_create(&feed_tid, NULL, ai_feed_thread, NULL);
 
-    /* 等待几帧进入管线后再启动 mediamtx */
-    usleep(500000);
-
-    /* 等待第一帧有效数据进入管线 (最多等15秒) */
-    {
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_sec += 15;
-        pthread_mutex_lock(&g_start_lock);
-        while (!g_first_valid_frame && running) {
-            if (pthread_cond_timedwait(&g_start_cond, &g_start_lock, &ts) != 0)
-                break;
-        }
-        pthread_mutex_unlock(&g_start_lock);
-        printf("[MAIN] first valid frame %s, starting mediamtx\n",
-               g_first_valid_frame ? "OK" : "TIMEOUT");
-    }
-
-    if (start_mediamtx() != 0) { fprintf(stderr, "FATAL: mediamtx\n"); return -1; }
-
-    /* ---- 7. 系统就绪语音 ---- */
+    /* ---- 6. 系统就绪 ---- */
     printf("\n=== System Ready ===\n");
     tts_speak("元器件识别系统已就绪");
 
-    /* ---- 8. 主循环 (1秒 tick) ---- */
-    int64_t  tick = 0;
+    /* ---- 7. 主循环 (1秒 tick) ---- */
+    int64_t tick = 0;
     while (running) {
         sleep(1);
         tick++;
@@ -356,7 +274,7 @@ int main(void)
                                             has_damaged, has_unknown);
         }
 
-        /* 每10秒: 语音播报元器件统计 */
+        /* 每10秒: 语音播报 */
         if (tick % ANNOUNCE_INTERVAL == 0) {
             int counts[12], text_filter, has_damaged, has_unknown;
             cv_branch_get_component_result(counts, &text_filter,
@@ -366,18 +284,15 @@ int main(void)
         }
     }
 
-    /* ---- 9. 清理 ---- */
+    /* ---- 8. 清理 ---- */
     printf("\n=== Shutting down ===\n");
     tts_deinit();
     pthread_cond_broadcast(&g_queue.cond);
     pthread_join(cap_tid,  NULL);
-    pthread_join(push_tid, NULL);
+    pthread_join(feed_tid, NULL);
     cv_branch_deinit();
     oled_display_deinit();
-    free(g_anno_buf); g_anno_buf = NULL;
-    gst_pipeline_deinit();
     capture_deinit();
-    stop_mediamtx();
     printf("=== Done ===\n");
     return 0;
 }
