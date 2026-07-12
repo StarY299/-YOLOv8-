@@ -31,7 +31,7 @@
 #define H264_BITRATE 4000000
 #define QUEUE_SIZE   4
 
-#define VOICE_DIR        "/userdata/voices/"
+#define TTS_MODEL_DIR    "/userdata/tts/vits-icefall-zh-aishell3/"
 #define MODEL_PATH       "/userdata/components-i8.rknn"
 #define ANNOUNCE_INTERVAL 10   /* 语音播报间隔 (秒) */
 
@@ -298,7 +298,12 @@ int main(void)
     /* ---- 4. OLED 显示屏 ---- */
     oled_display_init();
 
-    /* ---- 5. 启动工作线程 ---- */
+    /* ---- 5. TTS 语音引擎 (sherpa-onnx) ---- */
+    if (tts_init(TTS_MODEL_DIR) != 0) {
+        fprintf(stderr, "WARN: TTS init failed, continuing without voice\n");
+    }
+
+    /* ---- 6. 启动工作线程 ---- */
     queue_init(&g_queue);
     pthread_t cap_tid, push_tid;
     pthread_create(&cap_tid,  NULL, capture_thread, NULL);
@@ -324,11 +329,11 @@ int main(void)
 
     if (start_mediamtx() != 0) { fprintf(stderr, "FATAL: mediamtx\n"); return -1; }
 
-    /* ---- 6. 系统就绪语音 ---- */
+    /* ---- 7. 系统就绪语音 ---- */
     printf("\n=== System Ready ===\n");
-    announce_system_ready(VOICE_DIR);
+    tts_speak("元器件识别系统已就绪");
 
-    /* ---- 7. 主循环 (1秒 tick) ---- */
+    /* ---- 8. 主循环 (1秒 tick) ---- */
     int64_t  tick = 0;
     while (running) {
         sleep(1);
@@ -356,13 +361,14 @@ int main(void)
             int counts[12], text_filter, has_damaged, has_unknown;
             cv_branch_get_component_result(counts, &text_filter,
                                             &has_damaged, &has_unknown);
-            announce_components(counts, text_filter,
-                               has_damaged, has_unknown, VOICE_DIR);
+            tts_announce_components(counts, text_filter,
+                                     has_damaged, has_unknown);
         }
     }
 
-    /* ---- 8. 清理 ---- */
+    /* ---- 9. 清理 ---- */
     printf("\n=== Shutting down ===\n");
+    tts_deinit();
     pthread_cond_broadcast(&g_queue.cond);
     pthread_join(cap_tid,  NULL);
     pthread_join(push_tid, NULL);

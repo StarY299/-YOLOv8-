@@ -18,6 +18,11 @@ CV_LIBS     = $(shell pkg-config --libs   opencv4)
 RKNN_CFLAGS = -I.
 RKNN_LIBS   = -L/usr/lib -lrknnrt -ldl
 
+# sherpa-onnx TTS (arm64 预编译库, 放在 /userdata/tts/)
+TTS_DIR     = /userdata/tts
+TTS_CFLAGS  = -I$(TTS_DIR)/include -DHAS_SHERPA_ONNX
+TTS_LIBS    = -L$(TTS_DIR)/lib -lsherpa-onnx -lonnxruntime
+
 # 源文件 — 精简版 (移除了 sensor, servo, tracker, tcp_server, fifo_rx, audio_receiver, uart, pca9685, recorder)
 CSRCS    = main.c capture.c rtsp_service.c rtsp_stream.c \
            oled.c font.c oled_display.c voice_service.c
@@ -25,10 +30,10 @@ CXXSRCS  = ai_processor.c rknn_infer.c
 OBJS     = $(CSRCS:.c=.o) ai_processor.o rknn_infer.o
 
 # 编译选项
-CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(GST_CFLAGS) $(RKNN_CFLAGS)
-CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(GST_CFLAGS) $(CV_CFLAGS) $(RKNN_CFLAGS) \
+CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(GST_CFLAGS) $(RKNN_CFLAGS) $(TTS_CFLAGS)
+CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(GST_CFLAGS) $(CV_CFLAGS) $(RKNN_CFLAGS) $(TTS_CFLAGS) \
            -DCV_BRANCH_HAS_OPENCV
-LDFLAGS  = -pthread $(GST_LIBS) $(CV_LIBS) $(RKNN_LIBS) -lrga -lrockchip_mpp -lm
+LDFLAGS  = -pthread $(GST_LIBS) $(CV_LIBS) $(RKNN_LIBS) $(TTS_LIBS) -lrga -lrockchip_mpp -lm
 
 all: $(TARGET)
 
