@@ -27,9 +27,9 @@ CSRCS    = main.c capture.c voice_service.c http_server.c \
 CXXSRCS  = ai_processor.c rknn_infer.c
 OBJS     = $(CSRCS:.c=.o) ai_processor.o rknn_infer.o
 
-# LVGL 头文件路径
-LVGL_CFLAGS = $(shell pkg-config --cflags lvgl 2>/dev/null)
-LVGL_LIBS   = $(shell pkg-config --libs   lvgl 2>/dev/null)
+# LVGL (源码编译安装到 /usr/local)
+LVGL_CFLAGS = -I/usr/local/include
+LVGL_LIBS   = -L/usr/local/lib -llvgl
 
 # 编译选项
 CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(RKNN_CFLAGS) $(TTS_CFLAGS) $(LVGL_CFLAGS)

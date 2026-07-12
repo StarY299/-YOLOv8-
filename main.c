@@ -30,7 +30,7 @@
 #define QUEUE_SIZE   4
 
 /* TFT 屏硬件 */
-#define TFT_SPI_DEV  "/dev/spidev2.0"   /* SPI 设备 (根据实际接线修改) */
+#define TFT_SPI_DEV  "/dev/spidev1.0"   /* SPI 设备 (板端实测) */
 #define TFT_GPIO_DC  44                 /* DC 引脚 GPIO 编号 */
 #define TFT_GPIO_RST 43                 /* RST 引脚 GPIO 编号 */
 
