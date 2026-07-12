@@ -19,13 +19,14 @@
 #include "tft_display.h"
 #include "tft_ui.h"
 #include "voice_service.h"
+#include "stt_service.h"
 
 #define CAP_WIDTH        1920
 #define CAP_HEIGHT       1080
 #define CAP_FPS          30
 #define H264_BITRATE     4000000
 #define QUEUE_SIZE       4
-#define MODEL_PATH       "/userdata/components-i8.rknn"
+#define MODEL_PATH       "/userdata/best-better-i8.rknn"
 #define ANNOUNCE_INTERVAL 10
 
 static volatile int running = 1;
@@ -165,6 +166,7 @@ int main(void) {
     if (start_mediamtx() != 0) { fprintf(stderr, "WARN: mediamtx\n"); }
 
     printf("\n=== System Ready ===\n");
+    if (stt_init() != 0) fprintf(stderr, "WARN: STT init failed\n");
     voice_ready();
 
     int64_t tick = 0;
@@ -172,6 +174,13 @@ int main(void) {
         sleep(1); tick++;
         if (tick % 30 == 0) { int64_t in, out, drop; cv_branch_get_stats(&in, &out, &drop);
             printf("[STATS] cv(in=%lld out=%lld drop=%lld)\n", (long long)in, (long long)out, (long long)drop); }
+        /* 语音命令: 检测到"开始"→立即播报一次 */
+        if (stt_has_wake_word()) {
+            int counts[12], f, d, u;
+            cv_branch_get_component_result(counts, &f, &d, &u);
+            voice_announce(counts, f, d, u);
+        }
+
         if (tick % 2 == 0) { int counts[12], f, d, u;
             cv_branch_get_component_result(counts, &f, &d, &u);
             tft_ui_update(counts, f, d, u); }
@@ -181,6 +190,7 @@ int main(void) {
     }
 
     printf("\n=== Shutting down ===\n");
+    stt_deinit();
     stop_mediamtx();
     pthread_cond_broadcast(&g_queue.cond);
     pthread_join(cap_tid, NULL); pthread_join(feed_tid, NULL);

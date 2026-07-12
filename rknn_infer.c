@@ -27,9 +27,9 @@ using namespace cv;
  * ============================================================ */
 #define MODEL_INPUT_W       640
 #define MODEL_INPUT_H       640
-#define SCORE_SUM_THRESH    0.10f   /* score_sum预滤 (INT8量化值偏小) */
-#define NMS_THRESHOLD       0.45f   /* Soft-NMS IoU 阈值 */
-#define SOFT_NMS_SIGMA      0.5f    /* Soft-NMS 高斯惩罚系数 σ */
+#define SCORE_SUM_THRESH    0.01f   /* score_sum预滤 (放宽, 密集场景不漏) */
+#define NMS_THRESHOLD       0.60f   /* Soft-NMS IoU 阈值 (提高, 减少密集元件误抑) */
+#define SOFT_NMS_SIGMA      0.30f   /* Soft-NMS 高斯惩罚 σ (降低, 惩罚更柔和) */
 #define SOFT_NMS_MIN_CONF   0.15f   /* Soft-NMS 最低保留置信度 */
 #define MAX_DETECTIONS      20
 
@@ -40,17 +40,17 @@ using namespace cv;
  * 手写文字(8-10): 阈值中等, 文字区域小但特征清晰
  */
 static const float CONF_THRESH_PER_CLASS[11] = {
-    0.55f,  /* 0: Capacitor  电容 */
-    0.55f,  /* 1: Diode      二极管 */
-    0.55f,  /* 2: Transistor 三极管 */
-    0.55f,  /* 3: Resister   电阻 */
-    0.55f,  /* 4: LED */
-    0.40f,  /* 5: Capacitor-damage */
-    0.40f,  /* 6: Resister-damage */
-    0.50f,  /* 7: dianzu (文字电阻) */
-    0.50f,  /* 8: dianrong (文字电容) */
-    0.50f,  /* 9: erjiguan (文字二极管) */
-    0.40f,  /*10: Diode-damage */
+    0.30f,  /* 0: Capacitor */
+    0.30f,  /* 1: Diode */
+    0.30f,  /* 2: Transistor */
+    0.30f,  /* 3: Resister */
+    0.30f,  /* 4: LED */
+    0.25f,  /* 5: Capacitor-damage */
+    0.25f,  /* 6: Resister-damage */
+    0.25f,  /* 7: dianzu */
+    0.25f,  /* 8: dianrong */
+    0.25f,  /* 9: erjiguan */
+    0.25f,  /*10: Diode-damage */
 };
 
 /* 根据类别获取置信度阈值, 未知类别使用默认值 */
@@ -133,68 +133,76 @@ static int cmp_conf_desc(const void *a, const void *b) {
 }
 
 /**
- * Soft-NMS (高斯惩罚)
+ * WBF (Weighted Box Fusion) — 加权盒融合
  *
- * 与硬 NMS 的区别:
- *   硬 NMS:  IoU > threshold → 直接删除低分框 (导致密集元件漏检)
- *   Soft-NMS: IoU > threshold → 用高斯函数降低低分框置信度 (保留重叠框)
+ * 与 NMS 的关键区别:
+ *   NMS/Soft-NMS: 重叠 → 删除或惩罚低分框 (信息丢失)
+ *   WBF:         重叠 → 按置信度加权平均坐标, 合并为更精确的一个框
  *
- * 惩罚公式:  conf *= exp(-IoU² / σ)
- *   当 σ=0.5, IoU=0.6  → conf ×= exp(-0.36/0.5) = 0.487
- *   当 σ=0.5, IoU=0.9  → conf ×= exp(-0.81/0.5) = 0.198
+ * 适用于密集元件场景: 多个检测框对应同一目标时, 融合后的框更准确;
+ *                     不同目标即使有部分重叠, 只要 IoU < threshold 就保持独立.
  *
- * 被惩罚后置信度 < SOFT_NMS_MIN_CONF 的框才最终丢弃.
+ * 算法:
+ *   1. 按置信度降序排列
+ *   2. 逐个与已融合的框比较 IoU
+ *   3. IoU > threshold → 加权融合: 新坐标 = (c1*box1 + c2*box2) / (c1+c2)
+ *   4. IoU < threshold → 作为新目标加入融合列表
+ *   5. 最终输出融合后的框, 置信度 = 加权平均
  */
+#define WBF_THRESHOLD  0.55f   /* IoU > 此值时融合, ≤此值时独立 */
+
 static int nms(raw_box_t *boxes, int n, float threshold)
 {
+    (void)threshold; /* 使用 WBF_THRESHOLD 替代 */
     qsort(boxes, n, sizeof(raw_box_t), cmp_conf_desc);
-
-    /* 预选 top-200 防止处理过多候选 */
     if (n > 200) n = 200;
 
-    int   keep_count = 0;
-    int   keep[200] = {0};
-    float sigma_sq = SOFT_NMS_SIGMA * SOFT_NMS_SIGMA;
+    /* 融合列表: 最多 MAX_DETECTIONS 个融合结果 */
+    raw_box_t fused[MAX_DETECTIONS];
+    float     fused_weight[MAX_DETECTIONS]; /* 累积置信度和 */
+    int       fused_count = 0;
 
     for (int i = 0; i < n; i++) {
         if (boxes[i].conf < SOFT_NMS_MIN_CONF) continue;
 
-        int suppressed = 0;
-        for (int j = 0; j < keep_count; j++) {
-            if (boxes[i].class_id != boxes[keep[j]].class_id) continue;
+        /* 找最佳匹配的融合框 (同类 + 最高 IoU) */
+        int    best_j = -1;
+        float  best_iou = WBF_THRESHOLD;
 
-            float iou_val = iou(&boxes[i], &boxes[keep[j]]);
-            if (iou_val > threshold) {
-                /* ---- Soft-NMS 高斯惩罚 ---- */
-                float penalty = expf(-(iou_val * iou_val) / sigma_sq);
-                boxes[i].conf *= penalty;
-
-                /* 惩罚后置信度过低 → 丢弃 */
-                if (boxes[i].conf < SOFT_NMS_MIN_CONF) {
-                    suppressed = 1;
-                    break;
-                }
+        for (int j = 0; j < fused_count; j++) {
+            if (boxes[i].class_id != fused[j].class_id) continue;
+            float iou_val = iou(&boxes[i], &fused[j]);
+            if (iou_val > best_iou) {
+                best_iou = iou_val;
+                best_j = j;
             }
         }
 
-        if (!suppressed) {
-            keep[keep_count++] = i;
-            if (keep_count >= MAX_DETECTIONS) break;
+        if (best_j >= 0) {
+            /* 加权融合: 新坐标 = 置信度加权平均 */
+            float w1 = fused_weight[best_j];
+            float w2 = boxes[i].conf;
+            float wt = w1 + w2;
+
+            fused[best_j].cx   = (fused[best_j].cx   * w1 + boxes[i].cx   * w2) / wt;
+            fused[best_j].cy   = (fused[best_j].cy   * w1 + boxes[i].cy   * w2) / wt;
+            fused[best_j].w    = (fused[best_j].w    * w1 + boxes[i].w    * w2) / wt;
+            fused[best_j].h    = (fused[best_j].h    * w1 + boxes[i].h    * w2) / wt;
+            fused[best_j].conf = fmaxf(fused[best_j].conf, boxes[i].conf);
+            fused_weight[best_j] = wt;
+        } else if (fused_count < MAX_DETECTIONS) {
+            /* 新目标 */
+            fused[fused_count] = boxes[i];
+            fused_weight[fused_count] = boxes[i].conf;
+            fused_count++;
         }
     }
 
-    /* 原地重排: 保留的移到前面 */
-    for (int i = 0; i < keep_count; i++) {
-        if (keep[i] != i) {
-            raw_box_t tmp = boxes[i];
-            boxes[i] = boxes[keep[i]];
-            boxes[keep[i]] = tmp;
-            for (int j = i + 1; j < keep_count; j++) {
-                if (keep[j] == i) keep[j] = keep[i];
-            }
-        }
-    }
-    return keep_count;
+    /* 复制融合结果回 boxes 数组 */
+    for (int i = 0; i < fused_count; i++)
+        boxes[i] = fused[i];
+
+    return fused_count;
 }
 
 /* ============================================================
@@ -239,6 +247,14 @@ static void preprocess(const uint8_t *bgr, int img_w, int img_h)
 
 	    copyMakeBorder(resized_tmp, resized, pad_y, pad_y, pad_x, pad_x,
 	                   BORDER_CONSTANT, Scalar(114, 114, 114));
+	    /* CLAHE: 局部对比度增强, 白纸上元件边缘更清晰 */
+	    static Mat lab, lab_l;
+	    cvtColor(resized, lab, COLOR_BGR2Lab);
+	    extractChannel(lab, lab_l, 0);
+	    static Ptr<CLAHE> clahe = createCLAHE(2.0, Size(8,8));
+	    clahe->apply(lab_l, lab_l);
+	    insertChannel(lab_l, lab, 0);
+	    cvtColor(lab, resized, COLOR_Lab2BGR);
     cvtColor(resized, rgb, COLOR_BGR2RGB);
 
     if (g_rknn.input_is_fp16) {

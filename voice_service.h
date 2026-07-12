@@ -14,7 +14,7 @@ extern "C" {
 int voice_ready(void);
 
 /* 播报元器件计数 */
-int voice_announce(const int counts[6], int text_filter,
+int voice_announce(int counts[6], int text_filter,
                    int has_damaged, int has_unknown);
 
 /* 播放单个 WAV (同步, 阻塞) */
