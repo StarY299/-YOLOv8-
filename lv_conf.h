@@ -12,9 +12,7 @@
 #define LV_MEM_SIZE             (32 * 1024) /* 32KB 内部内存 */
 #define LV_MEM_CUSTOM           0
 
-#define LV_TICK_CUSTOM          1          /* 使用自定义 lv_tick_inc() */
-#define LV_TICK_CUSTOM_SYS_TIME_EXPR (0)   /* 占位 */
-#define LV_TICK_CUSTOM_INCLUDE  <stdint.h>
+#define LV_TICK_CUSTOM          0          /* 使用默认 tick, 主循环调 lv_tick_inc() */
 
 #define LV_USE_LOG              0
 #define LV_USE_ASSERT_NULL      0
@@ -28,7 +26,7 @@
 #define LV_USE_CANVAS           0
 #define LV_USE_CHECKBOX         0
 #define LV_USE_DROPDOWN         0
-#define LV_USE_IMG              0
+#define LV_USE_IMG              1          /* animimg 依赖, 必须开 */
 #define LV_USE_LABEL            1
 #define LV_USE_LINE             0
 #define LV_USE_ROLLER           0

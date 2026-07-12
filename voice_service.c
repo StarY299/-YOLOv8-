@@ -42,6 +42,7 @@ typedef struct {
     pthread_cond_t  cond;
 } tts_queue_t;
 
+static volatile int g_queue_running = 0;
 static tts_queue_t g_queue;
 
 static void queue_init(tts_queue_t *q)
@@ -80,10 +81,10 @@ static int queue_get(tts_queue_t *q, char *out, int max_len)
 {
     pthread_mutex_lock(&q->lock);
 
-    while (q->count == 0 && g_queue.valid)
+    while (q->count == 0 && g_queue_running)
         pthread_cond_wait(&q->cond, &q->lock);
 
-    if (q->count == 0) {
+    if (q->count == 0 && !g_queue_running) {
         pthread_mutex_unlock(&q->lock);
         return -1;
     }
@@ -125,8 +126,6 @@ static void *tts_thread(void *arg)
 {
     (void)arg;
     char text[MAX_TEXT_LEN];
-    char wav_path[256];
-
     printf("[TTS] worker thread started\n");
 
     while (g_tts.running) {

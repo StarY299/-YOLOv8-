@@ -16,10 +16,10 @@ CV_LIBS     = $(shell pkg-config --libs   opencv4)
 RKNN_CFLAGS = -I.
 RKNN_LIBS   = -L/usr/lib -lrknnrt -ldl
 
-# sherpa-onnx TTS (arm64 预编译库, 放在 /userdata/tts/)
+# sherpa-onnx TTS (暂未部署, 取消 HAS_SHERPA_ONNX 走 fallback)
 TTS_DIR     = /userdata/tts
-TTS_CFLAGS  = -I$(TTS_DIR)/include -DHAS_SHERPA_ONNX
-TTS_LIBS    = -L$(TTS_DIR)/lib -lsherpa-onnx -lonnxruntime
+TTS_CFLAGS  = -I$(TTS_DIR)/include
+TTS_LIBS    = -L$(TTS_DIR)/lib
 
 # 源文件
 CSRCS    = main.c capture.c voice_service.c http_server.c \
@@ -28,14 +28,15 @@ CXXSRCS  = ai_processor.c rknn_infer.c
 OBJS     = $(CSRCS:.c=.o) ai_processor.o rknn_infer.o
 
 # LVGL (源码编译安装到 /usr/local)
-LVGL_CFLAGS = -I/usr/local/include
+# -DLV_CONF_INCLUDE_SIMPLE 让 LVGL include "lv_conf.h" (从 -I. 找到我们的)
+LVGL_CFLAGS = -DLV_CONF_INCLUDE_SIMPLE -I. -I/usr/local/include
 LVGL_LIBS   = -L/usr/local/lib -llvgl
 
 # 编译选项
-CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(RKNN_CFLAGS) $(TTS_CFLAGS) $(LVGL_CFLAGS)
-CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(CV_CFLAGS) $(RKNN_CFLAGS) $(TTS_CFLAGS) $(LVGL_CFLAGS) \
+CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(RKNN_CFLAGS) $(LVGL_CFLAGS)
+CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(CV_CFLAGS) $(RKNN_CFLAGS) $(LVGL_CFLAGS) \
            -DCV_BRANCH_HAS_OPENCV
-LDFLAGS  = -pthread $(CV_LIBS) $(RKNN_LIBS) $(TTS_LIBS) $(LVGL_LIBS) \
+LDFLAGS  = -pthread $(CV_LIBS) $(RKNN_LIBS) $(LVGL_LIBS) \
            -lrga -lrockchip_mpp -lm
 
 all: $(TARGET)

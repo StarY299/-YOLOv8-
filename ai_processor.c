@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <math.h>
+#include "rknn_infer.h"
 #include "ai_processor.h"
 
 /* ============================================================
@@ -276,7 +277,6 @@ static int64_t now_us(void)
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
-#include "rknn_infer.h"
 
 /* ---- 帧格式 → cv::Mat (BGR) ---- */
 static int frame_to_bgr(const cv_frame_t *frame, cv::Mat &mat)
