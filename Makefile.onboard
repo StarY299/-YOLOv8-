@@ -22,7 +22,7 @@ TTS_CFLAGS  = -I$(TTS_DIR)/include -DHAS_SHERPA_ONNX
 TTS_LIBS    = -L$(TTS_DIR)/lib -lsherpa-onnx -lonnxruntime
 
 # 源文件
-CSRCS    = main.c capture.c oled.c font.c oled_display.c voice_service.c
+CSRCS    = main.c capture.c oled.c font.c oled_display.c voice_service.c http_server.c
 CXXSRCS  = ai_processor.c rknn_infer.c
 OBJS     = $(CSRCS:.c=.o) ai_processor.o rknn_infer.o
 

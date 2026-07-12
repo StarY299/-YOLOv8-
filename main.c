@@ -17,6 +17,7 @@
 #include "ai_processor.h"
 #include "oled_display.h"
 #include "voice_service.h"
+#include "http_server.h"
 
 /* ============================================================
  *  配置
@@ -241,7 +242,10 @@ int main(void)
         fprintf(stderr, "WARN: TTS init failed, continuing without voice\n");
     }
 
-    /* ---- 5. 启动工作线程 ---- */
+    /* ---- 5. HTTP 推流 (浏览器查看检测画面) ---- */
+    http_server_start(8080);
+
+    /* ---- 6. 启动工作线程 ---- */
     queue_init(&g_queue);
     pthread_t cap_tid, feed_tid;
     pthread_create(&cap_tid,  NULL, capture_thread, NULL);
@@ -286,6 +290,7 @@ int main(void)
 
     /* ---- 8. 清理 ---- */
     printf("\n=== Shutting down ===\n");
+    http_server_stop();
     tts_deinit();
     pthread_cond_broadcast(&g_queue.cond);
     pthread_join(cap_tid,  NULL);
