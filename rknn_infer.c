@@ -39,18 +39,18 @@ using namespace cv;
  * 缺损/未知(6-7): 阈值较低, 特征弱、天然置信度偏低, 降低阈值避免漏检
  * 手写文字(8-10): 阈值中等, 文字区域小但特征清晰
  */
-static const float CONF_THRESH_PER_CLASS[12] = {
-    0.55f,  /* 0: resistor   */
-    0.55f,  /* 1: capacitor  */
-    0.50f,  /* 2: diode      */
-    0.50f,  /* 3: inductor   */
-    0.55f,  /* 4: LED        */
-    0.50f,  /* 5: IC_chip    */
-    0.35f,  /* 6: damaged    — 缺损特征弱,大幅降低 */
-    0.35f,  /* 7: unknown    — 未知形态多变,大幅降低 */
-    0.50f,  /* 8: text_R     */
-    0.50f,  /* 9: text_C     */
-    0.50f,  /*10: text_D     */
+static const float CONF_THRESH_PER_CLASS[11] = {
+    0.55f,  /* 0: Capacitor  电容 */
+    0.55f,  /* 1: Diode      二极管 */
+    0.55f,  /* 2: Transistor 三极管 */
+    0.55f,  /* 3: Resister   电阻 */
+    0.55f,  /* 4: LED */
+    0.40f,  /* 5: Capacitor-damage */
+    0.40f,  /* 6: Resister-damage */
+    0.50f,  /* 7: dianzu (文字电阻) */
+    0.50f,  /* 8: dianrong (文字电容) */
+    0.50f,  /* 9: erjiguan (文字二极管) */
+    0.40f,  /*10: Diode-damage */
 };
 
 /* 根据类别获取置信度阈值, 未知类别使用默认值 */
@@ -495,7 +495,7 @@ int rknn_infer_run(const uint8_t *bgr_data, int img_w, int img_h,
 
     raw_box_t *candidates = (raw_box_t *)malloc(MAX_DETECTIONS * 100 * sizeof(raw_box_t));
     int n_cand = 0;
-    int num_classes = 12;  /* resistor,capacitor,diode,inductor,LED,IC_chip,damaged,unknown,text_R,text_C,text_D */
+    int num_classes = 11;  /* 自动适配模型输出: boxes(4) + cls(11) = 15 */
 
     if (is_rkopt) {
         /* RKOPT YOLOv8: box [1,64,H,W] + cls [1,4,H,W] + score [1,1,H,W] × 3 scales */
@@ -638,9 +638,10 @@ out_loop: ;
         result->detections[i].w = (int)candidates[i].w;
         result->detections[i].h = (int)candidates[i].h;
         static const char *names[] = {
-            "resistor", "capacitor", "diode", "inductor",
-            "LED", "IC_chip", "damaged", "unknown",
-            "text_R", "text_C", "text_D"
+            "Capacitor","Diode","Transistor","Resister","LED",
+            "Cap-dam","Res-dam",
+            "text_R","text_C","text_D",
+            "Diode-dam"
         };
         int n_names = sizeof(names) / sizeof(names[0]);
         int cid = candidates[i].class_id;

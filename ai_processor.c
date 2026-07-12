@@ -36,27 +36,32 @@
 #define TEXT_CONF_MIN    0.50f /* 文字检测最低置信度 */
 #define DET_CONF_MIN     0.50f /* 元件检测最低置信度 */
 
-/* 类别索引常量 (与 rknn_infer.c labels 对齐) */
+/* 类别索引 (匹配模型输出: 0=Capacitor 1=Diode 2=Transistor 3=Resister 4=LED
+ *                       5=C-dam 6=R-dam 7=text_R 8=text_C 9=text_D 10=D-dam) */
 enum {
-    CLS_RESISTOR = 0,
-    CLS_CAPACITOR,
-    CLS_DIODE,
-    CLS_INDUCTOR,
-    CLS_LED,
-    CLS_IC_CHIP,
-    CLS_DAMAGED,
-    CLS_UNKNOWN,
-    CLS_TEXT_R,
-    CLS_TEXT_C,
-    CLS_TEXT_D,
-    CLS_COUNT
+    CLS_CAPACITOR = 0,
+    CLS_DIODE     = 1,
+    CLS_TRANSISTOR= 2,
+    CLS_RESISTOR  = 3,
+    CLS_LED       = 4,
+    CLS_C_DAMAGED = 5,
+    CLS_R_DAMAGED = 6,
+    CLS_TEXT_R    = 7,
+    CLS_TEXT_C    = 8,
+    CLS_TEXT_D    = 9,
+    CLS_D_DAMAGED = 10,
+    CLS_COUNT     = 11
 };
 
+/* 显示用名称: 按模型ID索引 */
 static const char *g_class_names[CLS_COUNT] = {
-    "resistor", "capacitor", "diode", "inductor",
-    "LED", "IC_chip", "damaged", "unknown",
-    "text_R", "text_C", "text_D"
+    "C", "D", "T", "R", "LED", "C-dam", "R-dam", "txtR", "txtC", "txtD", "D-dam"
 };
+
+/* 判断是否缺损类 (Cap-dam=5, Res-dam=6, Diode-dam=10) */
+static inline int is_damaged_cls(int cid) {
+    return cid == CLS_C_DAMAGED || cid == CLS_R_DAMAGED || cid == CLS_D_DAMAGED;
+}
 
 typedef struct {
     float   ema_counts[CLS_COUNT];   /* 每类 EMA 平滑计数 */
@@ -132,8 +137,10 @@ static void update_component_counts(const rknn_detection_t *dets, int n, int img
         g_cc.text_filter = detect_text_filter(dets, n, img_h);
 
     /* 缺损/未知标志 */
-    g_cc.has_damaged = (g_cc.stable_counts[CLS_DAMAGED] > 0) ? 1 : 0;
-    g_cc.has_unknown = (g_cc.stable_counts[CLS_UNKNOWN] > 0) ? 1 : 0;
+    g_cc.has_damaged = (g_cc.stable_counts[CLS_C_DAMAGED] > 0 ||
+                         g_cc.stable_counts[CLS_R_DAMAGED] > 0 ||
+                         g_cc.stable_counts[CLS_D_DAMAGED] > 0) ? 1 : 0;
+    g_cc.has_unknown = 0;  /* 当前模型无未知元件类 */
 
     g_cc.frame_cnt++;
     pthread_mutex_unlock(&g_cc.lock);
@@ -144,7 +151,17 @@ void cv_branch_get_component_result(int counts[12], int *text_filter,
                                      int *has_damaged, int *has_unknown)
 {
     pthread_mutex_lock(&g_cc.lock);
-    if (counts)      memcpy(counts, g_cc.stable_counts, sizeof(int) * CLS_COUNT);
+
+    /* 映射: model_class → display_index
+     * model: 0=C 1=D 2=T 3=R 4=LED 5=C-dam 6=R-dam 7=text_R 8=text_C 9=text_D 10=D-dam
+     * display: 0=R 1=C 2=D 3=T 4=LED 5=IC(未使用) */
+    static const int mdl2disp[11] = {1, 2, 3, 0, 4, -1, -1, -1, -1, -1, -1};
+    memset(counts, 0, sizeof(int) * 12);
+    for (int m = 0; m < 11; m++) {
+        int d = mdl2disp[m];
+        if (d >= 0) counts[d] = g_cc.stable_counts[m];
+    }
+
     if (text_filter) *text_filter = g_cc.text_filter;
     if (has_damaged) *has_damaged = g_cc.has_damaged;
     if (has_unknown) *has_unknown = g_cc.has_unknown;
@@ -372,18 +389,18 @@ static void draw_detections(cv::Mat &mat, rknn_result_t *rknn_res)
     for (int i = 0; i < rknn_res->count && i < 64; i++) {
         rknn_detection_t *d = &rknn_res->detections[i];
         int cid = d->class_id;
-        if (cid < 0 || cid >= n_colors) cid = CLS_UNKNOWN;
+        if (cid < 0 || cid >= n_colors) cid = CLS_TRANSISTOR;
         cv::Scalar color = colors[cid];
 
-        /* 文字类别用细框, 不区分虚实 */
-        if (cid >= CLS_TEXT_R) {
+        /* 文字类别用细框 */
+        if (cid >= CLS_TEXT_R && cid <= CLS_TEXT_D) {
             cv::rectangle(mat,
                           cv::Point(d->x, d->y),
                           cv::Point(d->x + d->w, d->y + d->h),
                           color, 1);
         }
-        /* 缺损和未知用虚线框 (通过画短线段模拟) */
-        else if (cid == CLS_DAMAGED || cid == CLS_UNKNOWN) {
+        /* 缺损类用虚线框 */
+        else if (is_damaged_cls(cid)) {
             int thickness = 2;
             int dash_len = 8;
             /* 简化: 用多个短线段近似虚线 (OpenCV 无原生虚线) */
