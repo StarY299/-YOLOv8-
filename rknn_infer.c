@@ -25,13 +25,41 @@ using namespace cv;
 /* ============================================================
  *  配置
  * ============================================================ */
-#define MODEL_INPUT_W      640
-#define MODEL_INPUT_H      640
-#define CONF_THRESHOLD     0.60f   /* 类别置信度阈值 */
-#define SCORE_SUM_THRESH   0.10f   /* score_sum预滤 (INT8量化值偏小) */
-#define NMS_THRESHOLD      0.45f
-#define MAX_DETECTIONS     20
-// NUM_CLASSES 从模型输出形状自动检测, 不再硬编码
+#define MODEL_INPUT_W       640
+#define MODEL_INPUT_H       640
+#define SCORE_SUM_THRESH    0.10f   /* score_sum预滤 (INT8量化值偏小) */
+#define NMS_THRESHOLD       0.45f   /* Soft-NMS IoU 阈值 */
+#define SOFT_NMS_SIGMA      0.5f    /* Soft-NMS 高斯惩罚系数 σ */
+#define SOFT_NMS_MIN_CONF   0.15f   /* Soft-NMS 最低保留置信度 */
+#define MAX_DETECTIONS      20
+
+/* 自适应类别置信度阈值 (num_classes=12)
+ *
+ * 常见元件(0-5):  阈值较高, 减少误检
+ * 缺损/未知(6-7): 阈值较低, 特征弱、天然置信度偏低, 降低阈值避免漏检
+ * 手写文字(8-10): 阈值中等, 文字区域小但特征清晰
+ */
+static const float CONF_THRESH_PER_CLASS[12] = {
+    0.55f,  /* 0: resistor   */
+    0.55f,  /* 1: capacitor  */
+    0.50f,  /* 2: diode      */
+    0.50f,  /* 3: inductor   */
+    0.55f,  /* 4: LED        */
+    0.50f,  /* 5: IC_chip    */
+    0.35f,  /* 6: damaged    — 缺损特征弱,大幅降低 */
+    0.35f,  /* 7: unknown    — 未知形态多变,大幅降低 */
+    0.50f,  /* 8: text_R     */
+    0.50f,  /* 9: text_C     */
+    0.50f,  /*10: text_D     */
+};
+
+/* 根据类别获取置信度阈值, 未知类别使用默认值 */
+static inline float get_conf_threshold(int class_id)
+{
+    if (class_id >= 0 && class_id < 12)
+        return CONF_THRESH_PER_CLASS[class_id];
+    return 0.55f;  /* 默认 */
+}
 
 /* ============================================================
  *  全局状态
@@ -104,38 +132,63 @@ static int cmp_conf_desc(const void *a, const void *b) {
     return (fa < fb) ? 1 : ((fa > fb) ? -1 : 0);
 }
 
+/**
+ * Soft-NMS (高斯惩罚)
+ *
+ * 与硬 NMS 的区别:
+ *   硬 NMS:  IoU > threshold → 直接删除低分框 (导致密集元件漏检)
+ *   Soft-NMS: IoU > threshold → 用高斯函数降低低分框置信度 (保留重叠框)
+ *
+ * 惩罚公式:  conf *= exp(-IoU² / σ)
+ *   当 σ=0.5, IoU=0.6  → conf ×= exp(-0.36/0.5) = 0.487
+ *   当 σ=0.5, IoU=0.9  → conf ×= exp(-0.81/0.5) = 0.198
+ *
+ * 被惩罚后置信度 < SOFT_NMS_MIN_CONF 的框才最终丢弃.
+ */
 static int nms(raw_box_t *boxes, int n, float threshold)
 {
     qsort(boxes, n, sizeof(raw_box_t), cmp_conf_desc);
 
-    /* 预选 top-200 防止NMS处理过多候选 */
+    /* 预选 top-200 防止处理过多候选 */
     if (n > 200) n = 200;
 
-    int keep_count = 0;
-    int keep[200] = {0};
+    int   keep_count = 0;
+    int   keep[200] = {0};
+    float sigma_sq = SOFT_NMS_SIGMA * SOFT_NMS_SIGMA;
 
     for (int i = 0; i < n; i++) {
+        if (boxes[i].conf < SOFT_NMS_MIN_CONF) continue;
+
         int suppressed = 0;
         for (int j = 0; j < keep_count; j++) {
-            if (boxes[i].class_id != boxes[keep[j]].class_id) continue; /* 同类才抑制 */
-            if (iou(&boxes[i], &boxes[keep[j]]) > threshold) {
-                suppressed = 1;
-                break;
+            if (boxes[i].class_id != boxes[keep[j]].class_id) continue;
+
+            float iou_val = iou(&boxes[i], &boxes[keep[j]]);
+            if (iou_val > threshold) {
+                /* ---- Soft-NMS 高斯惩罚 ---- */
+                float penalty = expf(-(iou_val * iou_val) / sigma_sq);
+                boxes[i].conf *= penalty;
+
+                /* 惩罚后置信度过低 → 丢弃 */
+                if (boxes[i].conf < SOFT_NMS_MIN_CONF) {
+                    suppressed = 1;
+                    break;
+                }
             }
         }
+
         if (!suppressed) {
             keep[keep_count++] = i;
             if (keep_count >= MAX_DETECTIONS) break;
         }
     }
 
-    // 原地重排: 保留的移到前面
+    /* 原地重排: 保留的移到前面 */
     for (int i = 0; i < keep_count; i++) {
         if (keep[i] != i) {
             raw_box_t tmp = boxes[i];
             boxes[i] = boxes[keep[i]];
             boxes[keep[i]] = tmp;
-            // 更新后续索引
             for (int j = i + 1; j < keep_count; j++) {
                 if (keep[j] == i) keep[j] = keep[i];
             }
@@ -482,7 +535,7 @@ int rknn_infer_run(const uint8_t *bgr_data, int img_w, int img_h,
                         if (sc < 0 || sc > 1) sc = 1.0f / (1.0f + expf(-sc));
                         if (sc > max_score) { max_score = sc; best_cls = c; }
                     }
-                    if (max_score < CONF_THRESHOLD) continue;
+                    if (max_score < get_conf_threshold(best_cls)) continue;
 
                     /* DFL box解码: 4 coord × 16 bins */
                     float ltrb[4];
@@ -558,7 +611,7 @@ out_loop: ;
                     float sc = out_data[(c + 4) * A + a];
                     if (sc > ms) { ms = sc; bc = c; }
                 }
-                if (ms < CONF_THRESHOLD) continue;
+                if (ms < get_conf_threshold(bc)) continue;
                 candidates[n_cand].cx = out_data[a];
                 candidates[n_cand].cy = out_data[A + a];
                 candidates[n_cand].w  = out_data[2*A + a];
