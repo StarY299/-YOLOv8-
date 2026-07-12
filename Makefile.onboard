@@ -16,10 +16,7 @@ CV_LIBS     = $(shell pkg-config --libs   opencv4)
 RKNN_CFLAGS = -I.
 RKNN_LIBS   = -L/usr/lib -lrknnrt -ldl
 
-# sherpa-onnx TTS (已部署到 /userdata/tts/)
-TTS_DIR     = /userdata/tts
-TTS_CFLAGS  = -I$(TTS_DIR)/include -DHAS_SHERPA_ONNX
-TTS_LIBS    = -L$(TTS_DIR) -lsherpa-onnx-c-api -lonnxruntime
+# WAV 拼接语音 (预录制文件在 /userdata/tts/wavs/)
 
 # 源文件
 CSRCS    = main.c capture.c voice_service.c http_server.c \
@@ -33,10 +30,10 @@ LVGL_CFLAGS = -DLV_CONF_INCLUDE_SIMPLE -I. -I/usr/local/include
 LVGL_LIBS   = -L/usr/local/lib -llvgl
 
 # 编译选项
-CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(RKNN_CFLAGS) $(LVGL_CFLAGS) $(TTS_CFLAGS)
-CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(CV_CFLAGS) $(RKNN_CFLAGS) $(LVGL_CFLAGS) $(TTS_CFLAGS) \
+CFLAGS   = -Wall -O2 -std=gnu11 -pthread $(RKNN_CFLAGS) $(LVGL_CFLAGS)
+CXXFLAGS = -Wall -O2 -std=c++11 -pthread $(CV_CFLAGS) $(RKNN_CFLAGS) $(LVGL_CFLAGS) \
            -DCV_BRANCH_HAS_OPENCV
-LDFLAGS  = -pthread $(CV_LIBS) $(RKNN_LIBS) $(LVGL_LIBS) $(TTS_LIBS) \
+LDFLAGS  = -pthread $(CV_LIBS) $(RKNN_LIBS) $(LVGL_LIBS) \
            -lrga -lrockchip_mpp -lm
 
 all: $(TARGET)

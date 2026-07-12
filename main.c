@@ -34,7 +34,6 @@
 #define TFT_GPIO_DC  44                 /* DC 引脚 GPIO 编号 */
 #define TFT_GPIO_RST 43                 /* RST 引脚 GPIO 编号 */
 
-#define TTS_MODEL_DIR    "/userdata/tts/vits-icefall-zh-aishell3/"
 #define MODEL_PATH       "/userdata/components-i8.rknn"
 #define ANNOUNCE_INTERVAL 10   /* 语音播报间隔 (秒) */
 
@@ -226,10 +225,7 @@ int main(void)
         tft_ui_init();
     }
 
-    /* ---- 4. TTS 语音引擎 ---- */
-    if (tts_init(TTS_MODEL_DIR) != 0) {
-        fprintf(stderr, "WARN: TTS init failed, continuing without voice\n");
-    }
+    /* ---- 4. 语音播报 (WAV拼接) ---- */
 
     /* ---- 5. HTTP 服务器 ---- */
     http_server_start(8080);
@@ -242,7 +238,7 @@ int main(void)
 
     /* ---- 7. 系统就绪 ---- */
     printf("\n=== System Ready ===\n");
-    tts_speak("元器件识别系统已就绪");
+    voice_ready();
 
     /* ---- 8. 主循环: 5ms LVGL 心跳 + 秒级定时任务 ---- */
     int64_t tick = 0;
@@ -280,8 +276,8 @@ int main(void)
                 int counts[12], text_filter, has_damaged, has_unknown;
                 cv_branch_get_component_result(counts, &text_filter,
                                                 &has_damaged, &has_unknown);
-                tts_announce_components(counts, text_filter,
-                                         has_damaged, has_unknown);
+                voice_announce(counts, text_filter,
+                                has_damaged, has_unknown);
             }
         }
     }
@@ -289,7 +285,6 @@ int main(void)
     /* ---- 9. 清理 ---- */
     printf("\n=== Shutting down ===\n");
     http_server_stop();
-    tts_deinit();
     pthread_cond_broadcast(&g_queue.cond);
     pthread_join(cap_tid,  NULL);
     pthread_join(feed_tid, NULL);
