@@ -12,6 +12,7 @@ extern "C" {
 #endif
 
 int  stt_init(void);
+int  stt_is_ready(void);   /* 模型加载是否完成 */
 void stt_deinit(void);
 
 /* 获取最新识别文本 (非阻塞), 无新结果返回 NULL */

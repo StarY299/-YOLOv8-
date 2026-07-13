@@ -102,7 +102,7 @@ int main(void) {
     printf("=== RV1126B Component Recognition System ===\n");
     signal(SIGTERM,sig_handler);signal(SIGINT,sig_handler);
 
-    /* 1. 语音识别最先启动 (模型加载耗时) */
+    /* 1. 语音识别: 后台加载模型 */
     int stt_ok = (stt_init() == 0);
 
     /* 2. 摄像头 */
@@ -125,6 +125,13 @@ int main(void) {
     pthread_create(&feed_tid,NULL,ai_feed_thread,NULL);
     usleep(500000);
     if(start_mediamtx()!=0)fprintf(stderr,"WARN: mediamtx\n");
+
+    /* 等待 STT 模型加载完成 */
+    if (stt_ok) {
+        printf("[MAIN] waiting for STT model...\n");
+        while (running && !stt_is_ready()) sleep(1);
+        printf("[MAIN] STT ready\n");
+    }
 
     printf("\n=== System Ready ===\n");
     voice_ready();

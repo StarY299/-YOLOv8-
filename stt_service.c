@@ -90,6 +90,14 @@ static void *stt_thread(void *arg)
     return NULL;
 }
 
+int stt_is_ready(void) {
+#ifdef HAS_SHERPA_ONNX
+    return (g_recognizer != NULL) ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
 int stt_init(void)
 {
     if (g_running) return -1;
