@@ -36,7 +36,7 @@ static void *stt_thread(void *arg)
     while (g_running) {
         char cmd[256];
         snprintf(cmd, sizeof(cmd),
-            "arecord -q -f cd -d 2 -t raw - 2>/dev/null | "
+            "arecord -q -f cd -d 4 -t raw - 2>/dev/null | "
             "sox -q -t raw -r 44100 -e signed -b 16 -c 2 - "
             "-t raw -r 16000 -c 1 -e float - 2>/dev/null");
         FILE *mic = popen(cmd, "r");
@@ -78,7 +78,7 @@ int stt_init(void)
     memset(&cfg, 0, sizeof(cfg));
     cfg.feat_config.sample_rate = 16000;
     cfg.feat_config.feature_dim = 80;
-    cfg.model_config.debug = 1;
+    cfg.model_config.debug = 0;
     cfg.model_config.num_threads = 2;
     cfg.model_config.provider = "cpu";
 
@@ -88,6 +88,8 @@ int stt_init(void)
 
     snprintf(path, sizeof(path), "%s/tokens.txt", STT_MODEL_DIR);
     cfg.model_config.tokens = strdup(path);
+
+    /* CTC模型只支持greedy_search, 不支持hotwords */
 
     printf("[STT] loading model...\n");
     g_recognizer = SherpaOnnxCreateOnlineRecognizer(&cfg);
@@ -123,16 +125,37 @@ const char *stt_get_text(void)
     return buf[0] ? buf : NULL;
 }
 
+/* 模糊匹配: 检查文本是否包含关键词的任意连续2+字符子串 */
+static int fuzzy_match(const char *text, const char *kw)
+{
+    if (!text || !kw) return 0;
+    int kwlen = strlen(kw);
+    if (kwlen < 2) return strstr(text, kw) != NULL;
+    /* 允许1字差异: 匹配kw的任意 >= kwlen-1 子串 */
+    for (int i = 0; i <= 1; i++) {
+        for (int j = 0; j + kwlen - i <= kwlen; j++) {
+            char sub[32];
+            int len = kwlen - i;
+            if (len < 2) continue;
+            memcpy(sub, kw + j, len);
+            sub[len] = '\0';
+            if (strstr(text, sub)) return 1;
+        }
+    }
+    return 0;
+}
+
 int stt_has_wake_word(void)
 {
     const char *t = stt_get_text();
     if (!t) return 0;
-    return strstr(t, "开始") || strstr(t, "统计") || strstr(t, "播报");
+    return fuzzy_match(t, "开始统计") || fuzzy_match(t, "开始播报") ||
+           fuzzy_match(t, "全部统计") || fuzzy_match(t, "停止统计");
 }
 
 int stt_match_keyword(const char *kw)
 {
     const char *t = stt_get_text();
     if (!t) return 0;
-    return strstr(t, kw) != NULL;
+    return fuzzy_match(t, kw);
 }
