@@ -1,6 +1,6 @@
 /**
  * main.c — RV1126B 电子元器件识别系统
- * capture → RTSP + AI + TFT + 语音 + 语音识别
+ * capture → RTSP + AI + TFT + 语音 + STT语音触发
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +24,6 @@
 #define H264_BITRATE     4000000
 #define QUEUE_SIZE       4
 #define MODEL_PATH       "/userdata/best-better-i8.rknn"
-#define ANNOUNCE_INTERVAL 10
 
 static volatile int running = 1;
 
@@ -92,9 +91,9 @@ static void *ai_feed_thread(void *arg) {
 static void on_ai_result(const cv_result_t *result, void *user_data) {
     (void)user_data;
     if (!result||result->count==0) return;
-    printf("[AI] frame %lld: %d detections, elapsed=%lld us\n",(long long)result->frame_id,result->count,(long long)result->elapsed_us);
+    printf("[AI] frame %lld: %d detections\n",(long long)result->frame_id,result->count);
     for(int i=0;i<result->count&&i<8;i++){const cv_detection_t *d=&result->detections[i];
-        printf("  [%d] %s: %.2f @ (%d,%d %dx%d)\n",d->class_id,d->label,d->confidence,d->x,d->y,d->w,d->h);}
+        printf("  [%d] %s: %.2f\n",d->class_id,d->label,d->confidence);}
 }
 
 static void sig_handler(int sig) { (void)sig; running=0; }
@@ -103,16 +102,23 @@ int main(void) {
     printf("=== RV1126B Component Recognition System ===\n");
     signal(SIGTERM,sig_handler);signal(SIGINT,sig_handler);
 
+    /* 1. 语音识别最先启动 (模型加载耗时) */
+    int stt_ok = (stt_init() == 0);
+
+    /* 2. 摄像头 */
     char cap_dev[128]; if(capture_find_device(cap_dev,sizeof(cap_dev))!=0){fprintf(stderr,"FATAL: no camera\n");return -1;}
     printf("[MAIN] camera: %s\n",cap_dev);
     if(capture_init(cap_dev,CAP_WIDTH,CAP_HEIGHT,CAP_FPS)!=0)return -1;
     if(gst_pipeline_init(CAP_WIDTH,CAP_HEIGHT,CAP_FPS,H264_BITRATE)!=0){capture_deinit();return -1;}
 
+    /* 3. AI */
     cv_branch_config_t cv_cfg={.max_queue_size=2,.on_result=on_ai_result,.model_path=MODEL_PATH};
     cv_branch_init(&cv_cfg);
 
+    /* 4. TFT */
     if(tft_display_init()!=0)fprintf(stderr,"WARN: TFT init failed\n");else tft_ui_init();
 
+    /* 5. 启动工作线程 */
     queue_init(&g_queue);
     pthread_t cap_tid,feed_tid;
     pthread_create(&cap_tid,NULL,capture_thread,NULL);
@@ -120,18 +126,36 @@ int main(void) {
     usleep(500000);
     if(start_mediamtx()!=0)fprintf(stderr,"WARN: mediamtx\n");
 
-    if(stt_init()!=0)fprintf(stderr,"WARN: STT init failed\n");
     printf("\n=== System Ready ===\n");
     voice_ready();
+    if (stt_ok) printf(">> Say '开始统计' to trigger announcement\n");
+    else        printf(">> STT disabled, periodic announce every 10s\n");
 
     int64_t tick=0;
+    int announced_with_stt = 0; /* 避免语音连续触发 */
+
     while(running){
         sleep(1);tick++;
-        if(stt_has_wake_word()){int c[12],f,d;cv_branch_get_component_result(c,&f,&d,NULL);voice_announce(c,f,d);}
+
+        /* 语音触发播报 */
+        if(stt_ok && stt_has_wake_word() && !announced_with_stt){
+            int c[12],f,d;
+            cv_branch_get_component_result(c,&f,&d,NULL);
+            voice_announce(c,f,d);
+            announced_with_stt = 1;
+        }
+        /* 语音触发后冷却 3 秒 */
+        if(announced_with_stt && tick%3==0) announced_with_stt = 0;
+
+        /* TFT 2秒刷新 */
+        if(tick%2==0){int c[12],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
+
+        /* 无STT时10秒自动播报 */
+        if(!stt_ok && tick%10==0){int c[12],f,d;cv_branch_get_component_result(c,&f,&d,NULL);voice_announce(c,f,d);}
+
+        /* 30秒统计 */
         if(tick%30==0){int64_t in,out,drop;cv_branch_get_stats(&in,&out,&drop);
             printf("[STATS] cv(in=%lld out=%lld drop=%lld)\n",(long long)in,(long long)out,(long long)drop);}
-        if(tick%2==0){int c[12],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
-        if(tick%ANNOUNCE_INTERVAL==0){int c[12],f,d;cv_branch_get_component_result(c,&f,&d,NULL);voice_announce(c,f,d);}
     }
 
     printf("\n=== Shutting down ===\n");
