@@ -28,7 +28,7 @@ TTS_LIBS    = -L$(TTS_DIR) -lsherpa-onnx-c-api -lonnxruntime
 
 # 源文件
 CSRCS    = main.c capture.c rtsp_service.c rtsp_stream.c \
-           voice_service.c stt_service.c \
+           voice_service.c stt_service.c button.c \
            tft_display.c tft_ui.c lcd.c zk.c
 CXXSRCS  = ai_processor.c rknn_infer.c
 OBJS     = $(CSRCS:.c=.o) ai_processor.o rknn_infer.o

@@ -18,6 +18,10 @@
 
 static pthread_t      g_thread;
 static volatile int   g_running = 0;
+static volatile int   g_listening = 0;
+static volatile int   g_paused = 0;
+static FILE          *g_mic = NULL;
+static pthread_mutex_t g_mic_lock = PTHREAD_MUTEX_INITIALIZER;
 static char           g_text[TEXT_BUF_SZ];
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -29,42 +33,45 @@ static const SherpaOnnxOnlineStream    *g_stream = NULL;
 static void *stt_thread(void *arg)
 {
     (void)arg;
-    printf("[STT] thread started, loading model...\n");
+    printf("[STT] thread started, waiting for system ready...\n");
 
-#ifdef HAS_SHERPA_ONNX
-    SherpaOnnxOnlineRecognizerConfig cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.feat_config.sample_rate = 16000;
-    cfg.feat_config.feature_dim = 80;
-    cfg.model_config.debug = 0;
-    cfg.model_config.num_threads = 2;
-    cfg.model_config.provider = "cpu";
+    /* 等待主线程调用 stt_start_listening() */
+    while (g_running && !g_listening) usleep(100000);
 
-    char _path[256];
-    snprintf(_path, sizeof(_path), "%s/model.int8.onnx", STT_MODEL_DIR);
-    cfg.model_config.zipformer2_ctc.model = strdup(_path);
-    snprintf(_path, sizeof(_path), "%s/tokens.txt", STT_MODEL_DIR);
-    cfg.model_config.tokens = strdup(_path);
-
-    g_recognizer = SherpaOnnxCreateOnlineRecognizer(&cfg);
-    if (!g_recognizer) { fprintf(stderr, "[STT] init failed\n"); g_running=0; return NULL; }
-    g_stream = SherpaOnnxCreateOnlineStream(g_recognizer);
-    if (!g_stream) { SherpaOnnxDestroyOnlineRecognizer(g_recognizer); g_recognizer=NULL; g_running=0; return NULL; }
-    printf("[STT] model loaded, listening...\n");
-#endif
+    printf("[STT] opening microphone...\n");
 
     float   buf[AUDIO_CHUNK];
     char    last_text[TEXT_BUF_SZ] = {0};
 
-    FILE *mic = popen(
+    /* 打开麦克风 */
+    pthread_mutex_lock(&g_mic_lock);
+    g_mic = popen(
         "arecord -q -f cd -t raw - 2>/dev/null | "
         "sox -q -t raw -r 44100 -e signed -b 16 -c 2 - "
         "-t raw -r 16000 -c 1 -e float - 2>/dev/null", "r");
-    if (!mic) { perror("[STT] mic"); return NULL; }
+    pthread_mutex_unlock(&g_mic_lock);
+    if (!g_mic) { perror("[STT] mic"); return NULL; }
 
     while (g_running) {
+        /* 暂停检查: 关闭/重开麦克风 */
+        if (g_paused) {
+            pthread_mutex_lock(&g_mic_lock);
+            if (g_mic) { pclose(g_mic); g_mic = NULL; }
+            pthread_mutex_unlock(&g_mic_lock);
+            while (g_running && g_paused) usleep(100000);
+            /* 恢复: 重开麦克风 */
+            pthread_mutex_lock(&g_mic_lock);
+            g_mic = popen(
+                "arecord -q -f cd -t raw - 2>/dev/null | "
+                "sox -q -t raw -r 44100 -e signed -b 16 -c 2 - "
+                "-t raw -r 16000 -c 1 -e float - 2>/dev/null", "r");
+            pthread_mutex_unlock(&g_mic_lock);
+            continue;
+        }
+        if (!g_mic) { usleep(100000); continue; }
+
 #ifdef HAS_SHERPA_ONNX
-        int n = fread(buf, sizeof(float), AUDIO_CHUNK, mic);
+        int n = fread(buf, sizeof(float), AUDIO_CHUNK, g_mic);
         if (n <= 0) { usleep(50000); continue; }
 
         SherpaOnnxOnlineStreamAcceptWaveform(g_stream, AUDIO_RATE, buf, n);
@@ -81,14 +88,19 @@ static void *stt_thread(void *arg)
             fprintf(stderr, "[STT] %s\n", r->text);
         }
 #else
-        fread(buf, sizeof(float), AUDIO_CHUNK, mic);
-        pclose(mic);
+        fread(buf, sizeof(float), AUDIO_CHUNK, g_mic);
+        if(g_mic){pclose(g_mic);g_mic=NULL;};
         usleep(100000);
 #endif
     }
     printf("[STT] thread stopped\n");
     return NULL;
 }
+
+void stt_start_listening(void) { g_listening = 1; g_paused = 0; }
+
+void stt_pause_listening(void)  { g_paused = 1; }
+void stt_resume_listening(void) { g_paused = 0; }
 
 int stt_is_ready(void) {
 #ifdef HAS_SHERPA_ONNX
@@ -101,6 +113,28 @@ int stt_is_ready(void) {
 int stt_init(void)
 {
     if (g_running) return -1;
+#ifdef HAS_SHERPA_ONNX
+    SherpaOnnxOnlineRecognizerConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.feat_config.sample_rate = 16000;
+    cfg.feat_config.feature_dim = 80;
+    cfg.model_config.debug = 0;
+    cfg.model_config.num_threads = 2;
+    cfg.model_config.provider = "cpu";
+
+    char path[256];
+    snprintf(path, sizeof(path), "%s/model.int8.onnx", STT_MODEL_DIR);
+    cfg.model_config.zipformer2_ctc.model = strdup(path);
+    snprintf(path, sizeof(path), "%s/tokens.txt", STT_MODEL_DIR);
+    cfg.model_config.tokens = strdup(path);
+
+    printf("[STT] loading model...\n");
+    g_recognizer = SherpaOnnxCreateOnlineRecognizer(&cfg);
+    if (!g_recognizer) { fprintf(stderr, "[STT] init failed\n"); return -1; }
+    g_stream = SherpaOnnxCreateOnlineStream(g_recognizer);
+    if (!g_stream) { SherpaOnnxDestroyOnlineRecognizer(g_recognizer); g_recognizer=NULL; return -1; }
+    printf("[STT] model OK\n");
+#endif
 
     g_running = 1;
     if (pthread_create(&g_thread, NULL, stt_thread, NULL) != 0) { g_running = 0; return -1; }

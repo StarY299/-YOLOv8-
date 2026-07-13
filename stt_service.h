@@ -12,7 +12,10 @@ extern "C" {
 #endif
 
 int  stt_init(void);
-int  stt_is_ready(void);   /* 模型加载是否完成 */
+int  stt_is_ready(void);
+void stt_start_listening(void);
+void stt_pause_listening(void);   /* 播报前暂停麦克风 */
+void stt_resume_listening(void);  /* 播报后恢复麦克风 */
 void stt_deinit(void);
 
 /* 获取最新识别文本 (非阻塞), 无新结果返回 NULL */
