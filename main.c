@@ -1,6 +1,6 @@
 /**
  * main.c — RV1126B 电子元器件识别系统
- * 按键控制模式 + STT语音指令
+ * 状态机: WAIT→JUDGE→TEXT/DAMAGED/GENERAL→WAIT
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,7 +27,7 @@
 #define MODEL_PATH       "/userdata/best3-i8.rknn"
 
 static volatile int running = 1;
-static int filter_override = -1; /* -1=AI决定, 0=R,1=C,2=D */
+static int filter_override = -1; /* 语音命令设置的过滤 */
 
 typedef struct { uint8_t *data; size_t size; int64_t frame_id; } queued_frame_t;
 typedef struct {
@@ -78,8 +78,6 @@ static void *ai_feed_thread(void *arg){(void)arg;
 static void on_ai_result(const cv_result_t *result, void *user_data){(void)user_data;
     if(!result||result->count==0)return;
     printf("[AI] frame %lld: %d detections\n",(long long)result->frame_id,result->count);
-    for(int i=0;i<result->count&&i<8;i++){const cv_detection_t *d=&result->detections[i];
-        printf("  [%d] %s: %.2f\n",d->class_id,d->label,d->confidence);}
 }
 static void sig_handler(int sig){(void)sig;running=0;}
 
@@ -87,59 +85,64 @@ int main(void){
     printf("=== RV1126B Component Recognition System ===\n");
     signal(SIGTERM,sig_handler);signal(SIGINT,sig_handler);
 
-    /* 1. STT 加载 (麦关) + 按键 */
     int stt_ok=(stt_init()==0);
     if(stt_ok){voice_play("stt_ready");printf("[MAIN] STT ready\n");}
     button_init(0);
 
-    /* 2. 摄像头 */
     char cap_dev[128];if(capture_find_device(cap_dev,sizeof(cap_dev))!=0){fprintf(stderr,"FATAL: no camera\n");return -1;}
     if(capture_init(cap_dev,CAP_WIDTH,CAP_HEIGHT,CAP_FPS)!=0)return -1;
     if(gst_pipeline_init(CAP_WIDTH,CAP_HEIGHT,CAP_FPS,H264_BITRATE)!=0){capture_deinit();return -1;}
 
-    /* 3. AI + TFT */
     cv_branch_config_t cv_cfg={.max_queue_size=2,.on_result=on_ai_result,.model_path=MODEL_PATH};
     cv_branch_init(&cv_cfg);
     if(tft_display_init()!=0)fprintf(stderr,"WARN: TFT\n");else tft_ui_init();
 
-    /* 4. 工作线程 */
     queue_init(&g_queue);pthread_t cap_tid,feed_tid;
     pthread_create(&cap_tid,NULL,capture_thread,NULL);
     pthread_create(&feed_tid,NULL,ai_feed_thread,NULL);
     usleep(500000);if(start_mediamtx()!=0)fprintf(stderr,"WARN: mediamtx\n");
 
-    printf("\n=== System Ready ===\n");voice_ready();
-    printf("Short press=announce  Long press=voice command\n");
+    printf("\n=== System Ready (WAIT) ===\n");voice_ready();
+    printf("Key 0=JUDGE  Key 2=voice command\n");
 
     int64_t tick=0;
-    while(running){sleep(1);tick++;
+    while(running){
+        for(int i=0;i<10&&running;i++){usleep(100000);
+            int btn=button_read(),key=button_key();
 
-        int btn=button_read();
-        if(btn==BTN_SHORT){ /* 短按: 直接播报 */
-            int c[12],f,d;cv_branch_get_component_result(c,&f,&d,NULL);
-            if(filter_override>=0)f=filter_override;
-            voice_announce(c,f,d);
-        }
-        if(btn==BTN_LONG&&stt_ok){ /* 长按: 开麦听指令 */
-            printf("[MAIN] listening...\n");
-            stt_start_listening();sleep(5);stt_pause_listening();
-            const char *t=stt_get_text();
-            if(t){printf("[MAIN] heard: %s\n",t);
-                if(strstr(t,"电阻"))filter_override=0;
-                else if(strstr(t,"电容"))filter_override=1;
-                else if(strstr(t,"二极管"))filter_override=2;
-                else if(strstr(t,"全部")||strstr(t,"所有"))filter_override=-1;
+            /* 按键"0": JUDGE → TEXT/DAMAGED/GENERAL → WAIT */
+            if(btn==BTN_SHORT && key==13){
+                int c[12],f,d;cv_branch_get_component_result(c,&f,&d,NULL);
+                int tf = (filter_override>=0) ? filter_override : f;
+
+                if(tf >= 0 && tf <= 2){ /* 文字模式 */
+                    printf("[JUDGE] TEXT mode (filter=%d)\n", tf);
+                    voice_text_mode(tf, c);
+                } else if(d){ /* 缺损模式 */
+                    printf("[JUDGE] DAMAGED mode\n");
+                    voice_damaged_mode(c);
+                } else { /* 通用模式 */
+                    printf("[JUDGE] GENERAL mode\n");
+                    voice_general_mode(c);
+                }
             }
-            int c[12],f,d;cv_branch_get_component_result(c,&f,&d,NULL);
-            if(filter_override>=0)f=filter_override;
-            voice_announce(c,f,d);
-        }
-        /* 清残留文本 */
-        if(stt_ok)stt_get_text();
 
-        /* TFT */
+            /* 按键"2": 开麦语音命令 */
+            if(btn==BTN_SHORT && key==1 && stt_ok){
+                printf("[MAIN] listening...\n");
+                stt_start_listening();usleep(4000000);stt_pause_listening();
+                const char *t=stt_get_text();
+                if(t){printf("[MAIN] heard: %s\n",t);
+                    if(strstr(t,"电阻"))filter_override=0;
+                    else if(strstr(t,"电容"))filter_override=1;
+                    else if(strstr(t,"二极管"))filter_override=2;
+                    else if(strstr(t,"全部"))filter_override=-1;
+                }
+            }
+            if(stt_ok)stt_get_text();
+        }
+        tick++;
         if(tick%2==0){int c[12],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
-        /* 30s统计 */
         if(tick%30==0){int64_t in,out,drop;cv_branch_get_stats(&in,&out,&drop);
             printf("[STATS] cv(in=%lld out=%lld drop=%lld)\n",(long long)in,(long long)out,(long long)drop);}
     }

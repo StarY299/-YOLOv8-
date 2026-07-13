@@ -56,11 +56,10 @@ int button_read(void)
 
     int idx = code_to_idx(key);
     if (idx < 0) {
-        /* 按键释放 */
+        g_last_key = -1;  /* 按键释放, 允许下次触发 */
         return BTN_NONE;
     }
 
-    /* 去抖: 同一按键连续只报一次 */
     if (idx == g_last_key) return BTN_NONE;
     g_last_key = idx;
     printf("[BTN] key %d pressed\n", idx);

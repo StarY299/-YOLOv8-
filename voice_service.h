@@ -1,5 +1,7 @@
 /**
- * voice_service.h — WAV 拼接语音播报 (完整状态机)
+ * voice_service.h — 五态语音播报状态机
+ *
+ * WAIT → JUDGE → TEXT/DAMAGED/GENERAL → WAIT
  */
 #ifndef _VOICE_SERVICE_H_
 #define _VOICE_SERVICE_H_
@@ -13,13 +15,14 @@ extern "C" {
 int voice_play(const char *name);
 int voice_ready(void);
 
-/**
- * 播报 (三态状态机):
- *   text_filter>=0 (红色手写): 仅播报对应类型 + 数量
- *   text_filter<0  (通用模式): 按 R→C→D→T→L 顺序播报全部
- *                              然后如果有缺损, 播报缺损种类+数量
- */
-int voice_announce(const int counts[12], int text_filter, int has_damaged);
+/* 文字模式: 仅播报指定类型 (text_filter: 0=R,1=C,2=D) */
+void voice_text_mode(int text_filter, const int counts[12]);
+
+/* 缺损模式: 仅播报缺损元件 */
+void voice_damaged_mode(const int counts[12]);
+
+/* 通用模式: 播报全部正常元件 */
+void voice_general_mode(const int counts[12]);
 
 #ifdef __cplusplus
 }
