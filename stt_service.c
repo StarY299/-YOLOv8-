@@ -97,9 +97,31 @@ static void *stt_thread(void *arg)
     return NULL;
 }
 
-void stt_start_listening(void) { g_listening = 1; g_paused = 0; }
+void stt_start_listening(void)
+{
+    /* 重置 STT 流上下文, 清除之前累积的识别文本 */
+#ifdef HAS_SHERPA_ONNX
+    if (g_recognizer && g_stream) {
+        SherpaOnnxOnlineStreamReset(g_recognizer, g_stream);
+    }
+#endif
+    pthread_mutex_lock(&g_lock);
+    g_text[0] = '\0';       /* 清空残留文本 */
+    pthread_mutex_unlock(&g_lock);
+    g_listening = 1;
+    g_paused = 0;
+}
 
-void stt_pause_listening(void)  { g_paused = 1; }
+void stt_pause_listening(void)
+{
+    /* 通知 ASR 输入结束, 刷出剩余帧 */
+#ifdef HAS_SHERPA_ONNX
+    if (g_stream) {
+        SherpaOnnxOnlineStreamInputFinished(g_stream);
+    }
+#endif
+    g_paused = 1;
+}
 void stt_resume_listening(void) { g_paused = 0; }
 
 int stt_is_ready(void) {
@@ -192,7 +214,13 @@ int stt_has_wake_word(void)
 
 int stt_match_keyword(const char *kw)
 {
-    const char *t = stt_get_text();
+    const char *t = stt_get_text();  /* 注意: 会消费文本 */
     if (!t) return 0;
     return fuzzy_match(t, kw);
+}
+
+/* 对给定文本做模糊匹配 (不消费 STT 缓冲区, 可多次调用) */
+int stt_fuzzy_match_text(const char *text, const char *kw)
+{
+    return fuzzy_match(text, kw);
 }

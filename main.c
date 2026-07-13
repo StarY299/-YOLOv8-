@@ -24,7 +24,7 @@
 #define CAP_FPS          30
 #define H264_BITRATE     4000000
 #define QUEUE_SIZE       4
-#define MODEL_PATH       "/userdata/best3-i8.rknn"
+#define MODEL_PATH       "/userdata/best4-i8.rknn"
 
 static volatile int running = 1;
 static int filter_override = -1; /* 语音命令设置的过滤 */
@@ -107,11 +107,35 @@ int main(void){
 
     int64_t tick=0;
     while(running){
-        for(int i=0;i<10&&running;i++){usleep(100000);
+        for(int i=0;i<50&&running;i++){usleep(20000);  /* 50Hz 按键轮询, 配合消抖状态机 */
             int btn=button_read(),key=button_key();
 
+            /* ---- JUDGE 播报 (按键13 或 语音命令自动触发) ---- */
+            int do_judge = 0;
+
             /* 按键"0": JUDGE → TEXT/DAMAGED/GENERAL → WAIT */
-            if(btn==BTN_SHORT && key==13){
+            if(btn==BTN_SHORT && key==13) do_judge = 1;
+
+            /* 按键"2": 开麦语音命令 */
+            if(btn==BTN_SHORT && key==1 && stt_ok){
+                printf("[MAIN] listening...\n");
+                stt_start_listening();usleep(4000000);stt_pause_listening();
+                usleep(200000);  /* 等待 ASR 处理完残留帧 */
+                const char *t=stt_get_text();
+                if(t){
+                    printf("[MAIN] heard: '%s'\n", t);
+                    if(stt_fuzzy_match_text(t, "电阻"))      { filter_override=0; do_judge=1; printf("[MAIN] → 电阻模式\n"); }
+                    else if(stt_fuzzy_match_text(t, "电容"))  { filter_override=1; do_judge=1; printf("[MAIN] → 电容模式\n"); }
+                    else if(stt_fuzzy_match_text(t, "二极管")){ filter_override=2; do_judge=1; printf("[MAIN] → 二极管模式\n"); }
+                    else if(stt_fuzzy_match_text(t, "全部"))  { filter_override=-1;do_judge=1; printf("[MAIN] → 全部模式\n"); }
+                    else printf("[MAIN] no keyword matched\n");
+                } else {
+                    printf("[MAIN] heard nothing\n");
+                }
+            }
+
+            /* 执行 JUDGE 播报 */
+            if(do_judge){
                 int c[12],f,d;cv_branch_get_component_result(c,&f,&d,NULL);
                 int tf = (filter_override>=0) ? filter_override : f;
 
@@ -125,19 +149,10 @@ int main(void){
                     printf("[JUDGE] GENERAL mode\n");
                     voice_general_mode(c);
                 }
-            }
 
-            /* 按键"2": 开麦语音命令 */
-            if(btn==BTN_SHORT && key==1 && stt_ok){
-                printf("[MAIN] listening...\n");
-                stt_start_listening();usleep(4000000);stt_pause_listening();
-                const char *t=stt_get_text();
-                if(t){printf("[MAIN] heard: %s\n",t);
-                    if(strstr(t,"电阻"))filter_override=0;
-                    else if(strstr(t,"电容"))filter_override=1;
-                    else if(strstr(t,"二极管"))filter_override=2;
-                    else if(strstr(t,"全部"))filter_override=-1;
-                }
+                /* 播报完成后回到 WAIT 等待模式, 清除语音过滤 */
+                filter_override = -1;
+                printf("[MAIN] → WAIT\n");
             }
             if(stt_ok)stt_get_text();
         }

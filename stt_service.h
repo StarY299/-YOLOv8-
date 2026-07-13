@@ -27,6 +27,9 @@ int stt_has_wake_word(void);
 /* 匹配关键词 (检测到后自动清除) */
 int stt_match_keyword(const char *kw);
 
+/* 对给定文本做模糊匹配 (不消费 STT 缓冲区) */
+int stt_fuzzy_match_text(const char *text, const char *kw);
+
 #ifdef __cplusplus
 }
 #endif
