@@ -137,7 +137,8 @@ int gst_pipeline_init(int width, int height, int fps, int bitrate)
         "format",           GST_FORMAT_TIME,
         "is-live",          TRUE,
         "do-timestamp",     TRUE,
-        "max-bytes",        (guint64)0,       // 不限制
+        "max-bytes",        (guint64)(4 * 1024 * 1024),  // 限制4MB, 防内存泄漏
+        "max-buffers",      (guint)10,                    // 最多缓冲10帧
         "block",            FALSE,            // 非阻塞 push, 满则丢弃
         NULL);
     gst_caps_unref(caps);

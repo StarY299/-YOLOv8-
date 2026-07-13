@@ -116,12 +116,11 @@ void cv_branch_get_stats(int64_t *total_in, int64_t *total_out, int64_t *total_d
 /**
  * 获取最近一次 AI 处理后的标注 JPEG 帧 (线程安全, 非阻塞)
  *
- * 获取 AI 处理后的标注 JPEG 帧 (带检测框).
- * 可用于外部显示或保存.
+ * 分配新内存并返回标注 JPEG 数据 (带检测框).
+ * 调用方负责 free(返回值) 释放内存.
  *
  * @param out_size  输出 JPEG 数据长度 (仅当返回值非 NULL 时有效)
- * @return JPEG 数据指针 (cv_branch 内部管理, 调用方不应 free),
- *         无新帧时返回 NULL
+ * @return JPEG 数据指针 (调用方负责 free), 无新帧时返回 NULL
  */
 const uint8_t *cv_branch_get_annotated_frame(size_t *out_size);
 

@@ -761,7 +761,7 @@ void cv_branch_get_stats(int64_t *total_in, int64_t *total_out, int64_t *total_d
 
 const uint8_t *cv_branch_get_annotated_frame(size_t *out_size)
 {
-    if (!g_cv.initialized) return NULL;
+    if (!g_cv.initialized) { *out_size = 0; return NULL; }
 
     pthread_mutex_lock(&g_cv.out_lock);
     if (g_cv.out_jpeg_id >= 0 && g_cv.out_jpeg) {

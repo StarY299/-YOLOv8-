@@ -18,6 +18,7 @@
 #include "voice_service.h"
 #include "stt_service.h"
 #include "button.h"
+#include <sys/wait.h>
 
 #define CAP_WIDTH        1920
 #define CAP_HEIGHT       1080
@@ -28,6 +29,9 @@
 
 static volatile int running = 1;
 static int filter_override = -1; /* 语音命令设置的过滤 */
+static volatile int g_first_valid_frame = 0;
+static pthread_mutex_t g_start_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  g_start_cond = PTHREAD_COND_INITIALIZER;
 
 typedef struct { uint8_t *data; size_t size; int64_t frame_id; } queued_frame_t;
 typedef struct {
@@ -62,15 +66,62 @@ static void *capture_thread(void *arg){(void)arg;
 static uint8_t *g_anno_buf=NULL;static size_t g_anno_len=0;
 static pthread_mutex_t g_anno_lock=PTHREAD_MUTEX_INITIALIZER;
 static void *ai_feed_thread(void *arg){(void)arg;
+    int empty_streak = 0;
     while(running){queued_frame_t f;if(queue_get(&g_queue,&f)!=0)break;
-        if(f.size<256){free(f.data);continue;}
-        size_t ns=0;const uint8_t *nd=cv_branch_get_annotated_frame(&ns);
-        if(nd&&ns>256){pthread_mutex_lock(&g_anno_lock);free(g_anno_buf);
-            g_anno_buf=(uint8_t*)malloc(ns);if(g_anno_buf){memcpy(g_anno_buf,nd,ns);g_anno_len=ns;}else g_anno_len=0;
-            pthread_mutex_unlock(&g_anno_lock);}
-        int pushed=0;pthread_mutex_lock(&g_anno_lock);
-        if(g_anno_buf&&g_anno_len>256){gst_pipeline_push_frame(g_anno_buf,g_anno_len,f.frame_id);pushed=1;}
-        pthread_mutex_unlock(&g_anno_lock);if(!pushed)gst_pipeline_push_frame(f.data,f.size,f.frame_id);
+        /* 空帧过滤 */
+        if(f.size<256){
+            empty_streak++;
+            if(empty_streak%100==1)printf("[PUSH] skip empty frame streak=%d\n",empty_streak);
+            free(f.data);continue;
+        }
+        /* 空帧恢复 → 重启 mediamtx */
+        if(empty_streak>90){
+            printf("[PUSH] frame recovered after %d empty, restarting mediamtx\n",empty_streak);
+            system("killall -9 mediamtx 2>/dev/null; sleep 1; "
+                   "/userdata/mediamtx /userdata/mediamtx.yml &");
+        }
+        empty_streak = 0;
+
+        /* 更新标注帧缓存 */
+        {
+            size_t ns = 0;
+            const uint8_t *nd = cv_branch_get_annotated_frame(&ns);
+            if (nd && ns > 256) {
+                pthread_mutex_lock(&g_anno_lock);
+                free(g_anno_buf);
+                g_anno_buf = (uint8_t *)malloc(ns);
+                if (g_anno_buf) { memcpy(g_anno_buf, nd, ns); g_anno_len = ns; }
+                else g_anno_len = 0;
+                pthread_mutex_unlock(&g_anno_lock);
+            }
+        }
+        /* 推送标注帧, 无缓存时回退原始帧 */
+        {
+            int pushed = 0;
+            pthread_mutex_lock(&g_anno_lock);
+            if (g_anno_buf && g_anno_len > 256) {
+                gst_pipeline_push_frame(g_anno_buf, g_anno_len, f.frame_id);
+                pushed = 1;
+                static int anno_cnt=0;
+                if(++anno_cnt%30==1)printf("[PUSH] annotated frame #%d (%zu bytes)\n",anno_cnt,g_anno_len);
+            }
+            pthread_mutex_unlock(&g_anno_lock);
+            if (!pushed) {
+                gst_pipeline_push_frame(f.data, f.size, f.frame_id);
+                static int raw_cnt=0;
+                if(++raw_cnt%30==1)printf("[PUSH] raw frame #%d (%zu bytes, no annotation yet)\n",raw_cnt,f.size);
+            }
+        }
+
+        /* 首帧信号 */
+        if(!g_first_valid_frame){
+            pthread_mutex_lock(&g_start_lock);
+            g_first_valid_frame = 1;
+            pthread_cond_signal(&g_start_cond);
+            pthread_mutex_unlock(&g_start_lock);
+        }
+
+        /* 喂 AI */
         cv_frame_t cvf;cvf.data=f.data;cvf.size=f.size;cvf.width=CAP_WIDTH;cvf.height=CAP_HEIGHT;cvf.stride=0;
         cvf.format=CV_FMT_JPEG;cvf.timestamp_us=0;cvf.frame_id=f.frame_id;cv_branch_push_frame(&cvf);free(f.data);}
     return NULL;
@@ -100,7 +151,22 @@ int main(void){
     queue_init(&g_queue);pthread_t cap_tid,feed_tid;
     pthread_create(&cap_tid,NULL,capture_thread,NULL);
     pthread_create(&feed_tid,NULL,ai_feed_thread,NULL);
-    usleep(500000);if(start_mediamtx()!=0)fprintf(stderr,"WARN: mediamtx\n");
+
+    /* 等待首帧流入 GStreamer 管线后再启动 mediamtx, 避免 RTP 源超时 */
+    {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += 15;
+        pthread_mutex_lock(&g_start_lock);
+        while (!g_first_valid_frame && running) {
+            if (pthread_cond_timedwait(&g_start_cond, &g_start_lock, &ts) != 0)
+                break;
+        }
+        pthread_mutex_unlock(&g_start_lock);
+        printf("[MAIN] first frame %s, starting mediamtx\n",
+               g_first_valid_frame ? "OK" : "TIMEOUT");
+    }
+    if(start_mediamtx()!=0)fprintf(stderr,"WARN: mediamtx\n");
 
     printf("\n=== System Ready (WAIT) ===\n");voice_ready();
     printf("Key 0=JUDGE  Key 2=voice command\n");
@@ -160,11 +226,22 @@ int main(void){
         if(tick%2==0){int c[12],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
         if(tick%30==0){int64_t in,out,drop;cv_branch_get_stats(&in,&out,&drop);
             printf("[STATS] cv(in=%lld out=%lld drop=%lld)\n",(long long)in,(long long)out,(long long)drop);}
+
+        /* MediaMTX 存活监控: 每5秒检查, 死掉则自动重启 */
+        if(tick%5==0){
+            pid_t pid = get_mediamtx_pid();
+            if(pid > 0 && kill(pid, 0) != 0){
+                printf("[MAIN] mediamtx dead (pid=%d), restarting...\n", pid);
+                waitpid(pid, NULL, WNOHANG);  /* 收割僵尸 */
+                start_mediamtx();
+            }
+        }
     }
 
     printf("\n=== Shutting down ===\n");
     stt_deinit();stop_mediamtx();button_deinit();
     pthread_cond_broadcast(&g_queue.cond);pthread_join(cap_tid,NULL);pthread_join(feed_tid,NULL);
     cv_branch_deinit();tft_display_deinit();gst_pipeline_deinit();capture_deinit();
-    free(g_anno_buf);printf("=== Done ===\n");return 0;
+    free(g_anno_buf);g_anno_buf=NULL;
+    printf("=== Done ===\n");return 0;
 }
