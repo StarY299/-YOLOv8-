@@ -190,10 +190,14 @@ int main(void){
                 const char *t=stt_get_text();
                 if(t){
                     printf("[MAIN] heard: '%s'\n", t);
-                    if(stt_fuzzy_match_text(t, "电阻"))      { filter_override=0; do_judge=1; printf("[MAIN] → 电阻模式\n"); }
-                    else if(stt_fuzzy_match_text(t, "电容"))  { filter_override=1; do_judge=1; printf("[MAIN] → 电容模式\n"); }
-                    else if(stt_fuzzy_match_text(t, "二极管")){ filter_override=2; do_judge=1; printf("[MAIN] → 二极管模式\n"); }
-                    else if(stt_fuzzy_match_text(t, "全部"))  { filter_override=-1;do_judge=1; printf("[MAIN] → 全部模式\n"); }
+                    if(stt_fuzzy_match_text(t, "电阻")||stt_fuzzy_match_text(t, "店主")||stt_fuzzy_match_text(t, "电主"))
+                        { filter_override=0; do_judge=1; printf("[MAIN] → 电阻模式\n"); }
+                    else if(stt_fuzzy_match_text(t, "电容"))
+                        { filter_override=1; do_judge=1; printf("[MAIN] → 电容模式\n"); }
+                    else if(stt_fuzzy_match_text(t, "二极管")||stt_fuzzy_match_text(t, "二级管"))
+                        { filter_override=2; do_judge=1; printf("[MAIN] → 二极管模式\n"); }
+                    else if(stt_fuzzy_match_text(t, "全部"))
+                        { filter_override=-1;do_judge=1; printf("[MAIN] → 全部模式\n"); }
                     else printf("[MAIN] no keyword matched\n");
                 } else {
                     printf("[MAIN] heard nothing\n");
