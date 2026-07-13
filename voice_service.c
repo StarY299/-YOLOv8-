@@ -20,7 +20,7 @@ static const char *type_wav[] = {
     "diode",      /* 1: 二极管 */
     "Triode",     /* 2: 三极管 */
     "resistor",   /* 3: 电阻 */
-    "inductor",   /* 4: LED */
+    "LED",        /* 4: LED */
     "capacitor",  /* 5: C-dam */
     "resistor",   /* 6: R-dam */
     NULL, NULL, NULL,
@@ -104,14 +104,14 @@ void voice_damaged_mode(const int counts[12])
 /* ---- 通用模式: 播报全部正常元件 ---- */
 void voice_general_mode(const int counts[12])
 {
-    /* 正常元件: 3=R, 0=C, 1=D, 2=T */
-    int order[] = {3, 0, 1, 2};
+    /* 正常元件: 3=R, 0=C, 1=D, 2=T, 4=LED */
+    int order[] = {3, 0, 1, 2, 4};
     int any = 0;
 
     g_cmd[0]=0; g_nfiles=0;
     add_file("detect");
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         int m = order[i];
         if (counts[m] <= 0) continue;
         any = 1;
