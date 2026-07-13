@@ -1,16 +1,16 @@
 /**
- * button.h — GPIO 按键检测
+ * button.h — TM1650 4x4 矩阵按键
  */
 #ifndef BUTTON_H
 #define BUTTON_H
 
-/* 按键事件 */
 #define BTN_NONE     0
-#define BTN_SHORT    1   /* 短按 (<1秒) */
-#define BTN_LONG     2   /* 长按 (>2秒) */
+#define BTN_SHORT    1   /* 短按 */
+#define BTN_LONG     2   /* 长按 */
 
 int  button_init(int gpio_pin);
-int  button_read(void);     /* 返回 BTN_NONE/BTN_SHORT/BTN_LONG, 消费后清零 */
+int  button_read(void);           /* BTN_NONE/SHORT/LONG */
+int  button_key(void);            /* 最后按下的键号 0-15 */
 void button_deinit(void);
 
 #endif

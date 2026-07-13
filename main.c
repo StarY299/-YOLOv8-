@@ -24,7 +24,7 @@
 #define CAP_FPS          30
 #define H264_BITRATE     4000000
 #define QUEUE_SIZE       4
-#define MODEL_PATH       "/userdata/best-better-i8.rknn"
+#define MODEL_PATH       "/userdata/best3-i8.rknn"
 
 static volatile int running = 1;
 static int filter_override = -1; /* -1=AI决定, 0=R,1=C,2=D */
