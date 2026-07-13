@@ -114,7 +114,7 @@ static void update_component_counts(const rknn_detection_t *dets, int n, int img
         if (cid < 0 || cid >= CLS_COUNT) continue;
         if (dets[i].confidence < DET_CONF_MIN) continue;
         /* 文字类别不参与元件计数, 由 detect_text_filter 单独处理 */
-        if (cid >= CLS_TEXT_R) continue;
+        if (cid >= CLS_TEXT_R && cid <= CLS_TEXT_D) continue;
         raw[cid] += 1.0f;
     }
 
