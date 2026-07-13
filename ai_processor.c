@@ -33,7 +33,7 @@
 #define COUNT_WINDOW     30    /* 稳定窗口帧数 */
 #define TEXT_ROI_H       0.25f /* 文字检测 ROI: 图像上方 25% */
 #define EMA_ALPHA        0.3f  /* EMA 平滑系数 */
-#define TEXT_CONF_MIN    0.50f /* 文字检测最低置信度 */
+#define TEXT_CONF_MIN    0.25f /* 文字检测也放宽 */
 #define DET_CONF_MIN     0.25f /* 与缺损类最低阈值对齐 */
 
 /* 类别索引 (匹配模型输出: 0=Capacitor 1=Diode 2=Transistor 3=Resister 4=LED
@@ -81,21 +81,18 @@ static component_counter_t g_cc = {
 /* ---- 文字检测: 在图像上方 TEXT_ROI_H 区域内查找 text_* 类 ---- */
 static int detect_text_filter(const rknn_detection_t *dets, int n, int img_h)
 {
-    float roi_bottom = img_h * TEXT_ROI_H;
+    (void)img_h;
     int   votes[3] = {0};  /* text_R, text_C, text_D */
 
     for (int i = 0; i < n; i++) {
         int cid = dets[i].class_id;
         if (cid < CLS_TEXT_R || cid > CLS_TEXT_D) continue;
-        /* 仅统计位于 ROI 内的文字检测 */
-        float cy = dets[i].y + dets[i].h * 0.5f;
-        if (cy > roi_bottom) continue;
         if (dets[i].confidence < TEXT_CONF_MIN) continue;
         votes[cid - CLS_TEXT_R]++;
     }
 
-    /* 返回票数最多的文字类型, 需 ≥2 票 */
-    int best = -1, best_v = 1;
+    /* 返回票数最多的文字类型, 需 ≥1 票 */
+    int best = -1, best_v = 0;
     for (int i = 0; i < 3; i++) {
         if (votes[i] > best_v) { best_v = votes[i]; best = i; }
     }
