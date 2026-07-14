@@ -172,6 +172,13 @@ int button_key(void)
     return g_event_key;
 }
 
+void button_reset(void)
+{
+    g_state = STATE_IDLE;
+    g_pending_key = -1;
+    g_event_key   = -1;
+}
+
 void button_deinit(void)
 {
     if (g_fd >= 0) { close(g_fd); g_fd = -1; }

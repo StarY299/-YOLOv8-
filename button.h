@@ -11,6 +11,7 @@
 int  button_init(int gpio_pin);
 int  button_read(void);           /* BTN_NONE/SHORT/LONG */
 int  button_key(void);            /* 最后按下的键号 0-15 */
+void button_reset(void);          /* 强制重置状态机到 IDLE */
 void button_deinit(void);
 
 #endif

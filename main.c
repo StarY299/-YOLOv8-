@@ -25,7 +25,7 @@
 #define CAP_FPS          30
 #define H264_BITRATE     4000000
 #define QUEUE_SIZE       4
-#define MODEL_PATH       "/userdata/best4-i8.rknn"
+#define MODEL_PATH       "/userdata/best3-i8.rknn"
 
 static volatile int running = 1;
 static int filter_override = -1; /* 语音命令设置的过滤 */
@@ -175,18 +175,21 @@ int main(void){
     while(running){
         for(int i=0;i<50&&running;i++){usleep(20000);  /* 50Hz 按键轮询, 配合消抖状态机 */
             int btn=button_read(),key=button_key();
+            if(btn==BTN_SHORT)printf("[BTN-EVT] key=%d\n",key);
 
             /* ---- JUDGE 播报 (按键13 或 语音命令自动触发) ---- */
             int do_judge = 0;
 
-            /* 按键"0": JUDGE → TEXT/DAMAGED/GENERAL → WAIT */
-            if(btn==BTN_SHORT && key==13) do_judge = 1;
+            /* 按键"0": 立即 JUDGE 播报 (key 13 = 0x5D = 第4行第2列) */
+            if(btn==BTN_SHORT && key==13){ do_judge = 1; printf("[BTN] JUDGE trigger\n"); }
 
-            /* 按键"2": 开麦语音命令 */
+            /* 按键"2": 语音命令 → 自动 JUDGE (key 1 = 0x45 = 第1行第2列) */
             if(btn==BTN_SHORT && key==1 && stt_ok){
                 printf("[MAIN] listening...\n");
                 stt_start_listening();usleep(4000000);stt_pause_listening();
                 usleep(200000);  /* 等待 ASR 处理完残留帧 */
+                /* 语音监听期间按键状态冻结, 强制重置消抖状态机 */
+                button_reset();
                 const char *t=stt_get_text();
                 if(t){
                     printf("[MAIN] heard: '%s'\n", t);

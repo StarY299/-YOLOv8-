@@ -1,30 +1,82 @@
 /**
- * tft_ui.c — 元器件计数显示
+ * tft_ui.c — 元器件计数显示 (128x160 ST7735S)
  *
- * 128x160 布局 (需求1-8):
- *   ┌──────────────────┐
- *   │  元器件识别       │  标题
- *   │                  │
- *   │ ■ 电阻     5     │  ← 需求1 核心三元件
- *   │ ■ 电容     3     │
- *   │ ■ 二极管   2     │
- *   │ ─────────────    │  分隔线
- *   │ ■ 电感     1     │  ← 需求6 扩展
- *   │ ■ LED      2     │
- *   │ ■ IC芯片   0     │
- *   │ ─────────────    │
- *   │ ⚠ 缺损!  ? 未知3 │  ← 需求7/8 状态
- *   │ [仅统计: 电阻]   │  ← 需求2/3/4 过滤
- *   └──────────────────┘
+ * 借鉴 1.8LCD/comps.c 风格: 电路符号 + 交替行色 + 总计数
+ *
+ * 布局:
+ *   ┌──────────────────────┐
+ *   │   COMPONENT AI       │ 标题栏 DARKBLUE 18px
+ *   ├──────────────────────┤
+ *   │ ■ 5  Resistor  ╱╲╱╲  │ 行高24px, 交替背景色
+ *   │ ■ 3  Capacitor ─┤├─  │ 数量+英文名+电路符号
+ *   │ ■ 2  Diode     ─▷├─  │
+ *   │ ■ 2  LED       ─▷├→  │
+ *   ├──────────────────────┤
+ *   │ Total:12  DAM:2      │ 状态栏
+ *   │ FLT:RESISTOR         │ 过滤模式(有过滤时)
+ *   └──────────────────────┘
  */
 
 #include <stdio.h>
+#include <string.h>
 #include "lcd.h"
 #include "tft_display.h"
 #include "tft_ui.h"
 
-static const char *names[] = {"电阻","电容","二极管","电感","LED","IC芯片"};
-static const uint16_t colors[] = {GREEN, BLUE, RED, YELLOW, MAGENTA, 0xFD20};
+/* 元件信息 */
+static const struct {
+    int      mid;
+    char     *name;
+    uint16_t color;
+} g_comp[] = {
+    { 3, "Resistor ", GREEN   },
+    { 0, "Capacitor", BLUE    },
+    { 1, "Diode    ", RED     },
+    { 4, "LED      ", MAGENTA },
+};
+#define N_COMPS 4
+
+/* ====== 电路符号绘制 (参考 1.8LCD/comps.c) ====== */
+
+static void draw_resistor(uint16_t x, uint16_t y, uint16_t c) {
+    lcd_draw_line(x,    y+6, x+3,  y+6, c);
+    lcd_draw_line(x+3,  y+6, x+5,  y+2, c);
+    lcd_draw_line(x+5,  y+2, x+8,  y+11,c);
+    lcd_draw_line(x+8,  y+11,x+11, y+2, c);
+    lcd_draw_line(x+11, y+2, x+14, y+11,c);
+    lcd_draw_line(x+14, y+11,x+17, y+6, c);
+    lcd_draw_line(x+17, y+6, x+20, y+6, c);
+}
+
+static void draw_capacitor(uint16_t x, uint16_t y, uint16_t c) {
+    lcd_draw_line(x,    y+6, x+6,  y+6, c);
+    lcd_draw_line(x+14, y+6, x+20, y+6, c);
+    lcd_draw_line(x+6,  y+2, x+6,  y+11,c);
+    lcd_draw_line(x+14, y+2, x+14, y+11,c);
+}
+
+static void draw_diode(uint16_t x, uint16_t y, uint16_t c) {
+    lcd_draw_line(x,    y+6, x+5,  y+6, c);
+    lcd_draw_line(x+5,  y+2, x+12, y+6, c);
+    lcd_draw_line(x+5,  y+11,x+12, y+6, c);
+    lcd_draw_line(x+12, y+2, x+12, y+11,c);
+    lcd_draw_line(x+12, y+6, x+20, y+6, c);
+}
+
+static void draw_led(uint16_t x, uint16_t y, uint16_t c) {
+    lcd_draw_line(x,    y+6, x+4,  y+6, c);
+    lcd_draw_line(x+4,  y+2, x+10, y+6, c);
+    lcd_draw_line(x+4,  y+11,x+10, y+6, c);
+    lcd_draw_line(x+10, y+2, x+10, y+11,c);
+    /* 发光箭头 */
+    lcd_draw_line(x+6,  y+5, x+8,  y+8, c);
+    lcd_draw_line(x+6,  y+7, x+8,  y+10,c);
+    lcd_draw_line(x+10, y+6, x+18, y+6, c);
+}
+
+static void (*g_symbols[])(uint16_t,uint16_t,uint16_t) = {
+    draw_resistor, draw_capacitor, draw_diode, draw_led
+};
 
 void tft_ui_init(void)
 {
@@ -32,9 +84,7 @@ void tft_ui_init(void)
 
     /* 标题栏 */
     lcd_fill(0, 0, LCD_W, 18, DARKBLUE);
-    lcd_show_string(8, 2, (const uint8_t *)"Component AI", WHITE, DARKBLUE, 16, 0);
-
-    /* 分隔标题和内容 */
+    lcd_show_string(8, 2, (const uint8_t *)"COMPONENT AI", WHITE, DARKBLUE, 16, 0);
     lcd_draw_line(0, 18, LCD_W, 18, 0x4208);
 
     printf("[TFT-UI] init\n");
@@ -43,51 +93,62 @@ void tft_ui_init(void)
 void tft_ui_update(const int counts[12], int text_filter,
                    int has_damaged, int has_unknown)
 {
-    /* 映射: model→display: R(3), C(0), D(1), T(2), LED(4) */
-    static const int m2d[] = {3, 0, 1, 2, 4};
-    char buf[32];
+    char buf[16];
+    int  row_h = 26;
+    int  y0    = 21;
+    int  total = 0;
 
-    for (int i = 0; i < 3; i++) {
-        int y = 22 + i * 18;
-        int c = counts[m2d[i]];
-        uint16_t cl = c > 0 ? colors[i] : 0x3186;
+    for (int i = 0; i < N_COMPS; i++) {
+        int y   = y0 + i * row_h;
+        int cid = g_comp[i].mid;
+        int c   = counts[cid];
+        total += c;
 
-        lcd_fill(4, y+3, 12, y+11, cl);
-        snprintf(buf, sizeof(buf), "%-6s %2d", names[i], c);
-        uint16_t fg = (i == text_filter) ? YELLOW : WHITE;
-        lcd_show_string(16, y+2, (const uint8_t *)buf, fg, BLACK, 16, 0);
+        /* 交替行背景 */
+        uint16_t bg = (i % 2 == 0) ? BLACK : 0x1082;
+        lcd_fill(0, y, LCD_W - 1, y + row_h - 1, bg);
+        if (i > 0) lcd_draw_line(8, y, LCD_W - 8, y, 0x4208);
+
+        uint16_t fg  = (cid == text_filter) ? YELLOW : g_comp[i].color;
+        uint16_t clr = (c > 0) ? g_comp[i].color : 0x3186;
+
+        /* 数量 (12号字左对齐) */
+        snprintf(buf, sizeof(buf), "%d", c);
+        lcd_show_string(3, y + 5, (const uint8_t *)buf, fg, bg, 16, 0);
+
+        /* 元件名 */
+        lcd_show_string(20, y + 5, (const uint8_t *)g_comp[i].name, clr, bg, 16, 0);
+
+        /* 电路符号 (右对齐) */
+        if (g_symbols[i])
+            g_symbols[i](105, y + 6, clr);
     }
 
-    lcd_draw_line(0, 76, LCD_W, 76, 0x4208);
+    /* 状态栏 */
+    int sep_y = y0 + N_COMPS * row_h + 2;
+    lcd_draw_line(0, sep_y, LCD_W, sep_y, 0x4208);
+    lcd_fill(0, sep_y + 2, LCD_W, LCD_H, BLACK);
 
-    for (int i = 3; i < 5; i++) {
-        int y = 80 + (i - 3) * 18;
-        int c = counts[m2d[i]];
-        uint16_t cl = c > 0 ? colors[i] : 0x3186;
+    /* 总计数 */
+    snprintf(buf, sizeof(buf), "Total: %d", total);
+    lcd_show_string(2, sep_y + 4, (const uint8_t *)buf, WHITE, BLACK, 12, 0);
 
-        lcd_fill(4, y+3, 12, y+11, cl);
-        snprintf(buf, sizeof(buf), "%-6s %2d", names[i], c);
-        lcd_show_string(16, y+2, (const uint8_t *)buf, 0x9CF3, BLACK, 16, 0);
-    }
-    lcd_fill(0, 116, LCD_W, 134, BLACK); /* 清除第6行 */
-
-    lcd_draw_line(0, 134, LCD_W, 134, 0x4208);
-    lcd_fill(0, 136, LCD_W, 160, BLACK);
-
+    /* 缺损 */
+    int st2_y = sep_y + 18;
     if (has_damaged) {
-        lcd_show_string(4, 138, (const uint8_t *)"Damaged!", RED, BLACK, 16, 0);
-    }
-    if (has_unknown) {
-        snprintf(buf, sizeof(buf), "Unk:%d", counts[7]);
-        lcd_show_string(has_damaged?80:4, 138, (const uint8_t *)buf, YELLOW, BLACK, 16, 0);
-    }
-    if (!has_damaged && !has_unknown) {
-        lcd_show_string(4, 138, (const uint8_t *)"OK", GREEN, BLACK, 16, 0);
+        int d_cnt = counts[5] + counts[6] + counts[10];
+        snprintf(buf, sizeof(buf), "DAM:%d", d_cnt);
+        lcd_show_string(2, st2_y, (const uint8_t *)buf, RED, BLACK, 12, 0);
+    } else {
+        lcd_show_string(2, st2_y, (const uint8_t *)"OK", GREEN, BLACK, 12, 0);
     }
 
+    /* 过滤模式 */
     if (text_filter >= 0 && text_filter <= 2) {
-        static const char *fn[] = {"Resistor","Capacitor","Diode"};
-        snprintf(buf, sizeof(buf), "Flt:%s", fn[text_filter]);
-        lcd_show_string(60, 148, (const uint8_t *)buf, 0x6688, BLACK, 12, 0);
+        static const char *fn[] = {"RESISTOR","CAPACITOR","DIODE"};
+        snprintf(buf, sizeof(buf), "FLT:%s", fn[text_filter]);
+        lcd_show_string(50, st2_y, (const uint8_t *)buf, YELLOW, BLACK, 12, 0);
     }
+
+    (void)has_unknown;
 }
