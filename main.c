@@ -25,7 +25,7 @@
 #define CAP_FPS          30
 #define H264_BITRATE     4000000
 #define QUEUE_SIZE       4
-#define MODEL_PATH       "/userdata/best3-i8.rknn"
+#define MODEL_PATH       "/userdata/best5-i8.rknn"
 
 static volatile int running = 1;
 static int filter_override = -1; /* 语音命令设置的过滤 */
@@ -209,7 +209,7 @@ int main(void){
 
             /* 执行 JUDGE 播报: UNKNOWN > TEXT > DAMAGED > GENERAL */
             if(do_judge){
-                int c[12],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);
+                int c[13],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);
                 int tf = (filter_override>=0) ? filter_override : f;
 
                 if(u > 0){ /* 未知模式 — 最高优先级 */
@@ -233,7 +233,7 @@ int main(void){
             if(stt_ok)stt_get_text();
         }
         tick++;
-        if(tick%2==0){int c[12],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
+        if(tick%2==0){int c[13],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
         if(tick%30==0){int64_t in,out,drop;cv_branch_get_stats(&in,&out,&drop);
             printf("[STATS] cv(in=%lld out=%lld drop=%lld)\n",(long long)in,(long long)out,(long long)drop);}
 

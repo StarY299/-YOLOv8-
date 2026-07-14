@@ -25,6 +25,8 @@ static const char *type_wav[] = {
     "resistor",   /* 6: R-dam */
     NULL, NULL, NULL,
     "diode",      /*10: D-dam */
+    "Pot",        /*11: 电位器 */
+    "Connecter",  /*12: 连接器 */
 };
 
 static void add_file(const char *name)
@@ -58,7 +60,6 @@ int voice_play(const char *name)
 
 int voice_ready(void) { return voice_play("ready"); }
 
-/* ---- 未知模式: 播报未知元件 ---- */
 void voice_unknown_mode(int unknown_count)
 {
     if (unknown_count <= 0) return;
@@ -70,7 +71,7 @@ void voice_unknown_mode(int unknown_count)
 }
 
 /* ---- 文字模式: 仅播报一种元件 ---- */
-void voice_text_mode(int text_filter, const int counts[12])
+void voice_text_mode(int text_filter, const int counts[13])
 {
     static const int map[] = {3, 0, 1}; /* 0=R→3, 1=C→0, 2=D→1 */
     int m = map[text_filter];
@@ -91,7 +92,7 @@ void voice_text_mode(int text_filter, const int counts[12])
 }
 
 /* ---- 缺损模式: 仅播报缺损元件 ---- */
-void voice_damaged_mode(const int counts[12])
+void voice_damaged_mode(const int counts[13])
 {
     /* 缺损类: 6=R-dam, 5=C-dam, 10=D-dam */
     int d_order[] = {6, 5, 10};
@@ -102,34 +103,38 @@ void voice_damaged_mode(const int counts[12])
 
     for (int i = 0; i < 3; i++) {
         int m = d_order[i];
+        fprintf(stderr, "[VOICE-GEN] cls=%d count=%d\n", m, counts[m]);
         if (counts[m] <= 0) continue;
         any = 1;
         if (type_wav[m]) add_file(type_wav[m]);
         add_num(counts[m]);
         add_file("ge");
     }
+    fprintf(stderr, "[VOICE-GEN] any=%d, playing...\n", any);
     if (any) play_all();
     else { g_cmd[0]=0; g_nfiles=0; }
 }
 
 /* ---- 通用模式: 播报全部正常元件 ---- */
-void voice_general_mode(const int counts[12])
+void voice_general_mode(const int counts[13])
 {
     /* 正常元件: 3=R, 0=C, 1=D, 2=T, 4=LED */
-    int order[] = {3, 0, 1, 2, 4};
+    int order[] = {3, 0, 1, 4, 11, 12};
     int any = 0;
 
     g_cmd[0]=0; g_nfiles=0;
     add_file("detect");
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
         int m = order[i];
+        fprintf(stderr, "[VOICE-GEN] cls=%d count=%d\n", m, counts[m]);
         if (counts[m] <= 0) continue;
         any = 1;
         if (type_wav[m]) add_file(type_wav[m]);
         add_num(counts[m]);
         add_file("ge");
     }
+    fprintf(stderr, "[VOICE-GEN] any=%d, playing...\n", any);
     if (any) play_all();
     else { g_cmd[0]=0; g_nfiles=0; }
 }

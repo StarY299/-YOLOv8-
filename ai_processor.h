@@ -134,7 +134,7 @@ const uint8_t *cv_branch_get_annotated_frame(size_t *out_size);
  * @param has_damaged  输出: 1=检测到缺损元件, 0=无
  * @param has_unknown  输出: 1=检测到未知元件, 0=无
  */
-void cv_branch_get_component_result(int counts[12], int *text_filter,
+void cv_branch_get_component_result(int counts[13], int *text_filter,
                                      int *has_damaged, int *has_unknown);
 
 /**

@@ -33,8 +33,10 @@ static const struct {
     { 0, "Capacitor", BLUE    },
     { 1, "Diode    ", RED     },
     { 4, "LED      ", MAGENTA },
+    {11, "Pot      ", YELLOW  },
+    {12, "Connecter", 0x7D7C  },
 };
-#define N_COMPS 4
+#define N_COMPS 6
 
 /* ====== 电路符号绘制 (参考 1.8LCD/comps.c) ====== */
 
@@ -75,7 +77,7 @@ static void draw_led(uint16_t x, uint16_t y, uint16_t c) {
 }
 
 static void (*g_symbols[])(uint16_t,uint16_t,uint16_t) = {
-    draw_resistor, draw_capacitor, draw_diode, draw_led
+    draw_resistor, draw_capacitor, draw_diode, draw_led, NULL, NULL
 };
 
 void tft_ui_init(void)
@@ -90,11 +92,11 @@ void tft_ui_init(void)
     printf("[TFT-UI] init\n");
 }
 
-void tft_ui_update(const int counts[12], int text_filter,
+void tft_ui_update(const int counts[13], int text_filter,
                    int has_damaged, int has_unknown)
 {
     char buf[16];
-    int  row_h = 26;
+    int  row_h = 22;
     int  y0    = 21;
     int  total = 0;
 

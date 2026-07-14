@@ -39,7 +39,7 @@ using namespace cv;
  * 缺损/未知(6-7): 阈值较低, 特征弱、天然置信度偏低, 降低阈值避免漏检
  * 手写文字(8-10): 阈值中等, 文字区域小但特征清晰
  */
-static const float CONF_THRESH_PER_CLASS[11] = {
+static const float CONF_THRESH_PER_CLASS[13] = {
     0.50f,  /* 0: Capacitor */
     0.30f,  /* 1: Diode */
     0.30f,  /* 2: Transistor */
@@ -51,12 +51,14 @@ static const float CONF_THRESH_PER_CLASS[11] = {
     0.25f,  /* 8: dianrong */
     0.25f,  /* 9: erjiguan */
     0.25f,  /*10: Diode-damage */
+    0.30f,  /*11: Pot */
+    0.30f,  /*12: Connecter */
 };
 
 /* 根据类别获取置信度阈值, 未知类别使用默认值 */
 static inline float get_conf_threshold(int class_id)
 {
-    if (class_id >= 0 && class_id < 12)
+    if (class_id >= 0 && class_id < 13)
         return CONF_THRESH_PER_CLASS[class_id];
     return 0.55f;  /* 默认 */
 }
@@ -511,7 +513,7 @@ int rknn_infer_run(const uint8_t *bgr_data, int img_w, int img_h,
 
     raw_box_t *candidates = (raw_box_t *)malloc(MAX_DETECTIONS * 100 * sizeof(raw_box_t));
     int n_cand = 0;
-    int num_classes = 11;  /* 自动适配模型输出: boxes(4) + cls(11) = 15 */
+    int num_classes = 13;  /* 自动适配模型输出: boxes(4) + cls(11) = 15 */
 
     if (is_rkopt) {
         /* RKOPT YOLOv8: box [1,64,H,W] + cls [1,4,H,W] + score [1,1,H,W] × 3 scales */
@@ -657,7 +659,7 @@ out_loop: ;
             "Capacitor","Diode","Transistor","Resister","LED",
             "Cap-dam","Res-dam",
             "text_R","text_C","text_D",
-            "Diode-dam"
+            "Diode-dam","Pot","Connecter"
         };
         int n_names = sizeof(names) / sizeof(names[0]);
         int cid = candidates[i].class_id;
