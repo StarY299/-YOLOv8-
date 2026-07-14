@@ -73,7 +73,7 @@ void voice_unknown_mode(int unknown_count)
 /* ---- 文字模式: 仅播报一种元件 ---- */
 void voice_text_mode(int text_filter, const int counts[13])
 {
-    static const int map[] = {3, 0, 1}; /* 0=R→3, 1=C→0, 2=D→1 */
+    static const int map[] = {3, 0, 1, 4}; /* 0=R 1=C 2=D 3=LED */
     int m = map[text_filter];
 
     g_cmd[0]=0; g_nfiles=0;

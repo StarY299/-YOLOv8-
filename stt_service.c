@@ -10,6 +10,7 @@
 #ifdef HAS_SHERPA_ONNX
 #include "sherpa-onnx/c-api/c-api.h"
 #endif
+#include <sys/wait.h>
 #include "stt_service.h"
 
 #define AUDIO_RATE   16000
@@ -57,6 +58,8 @@ static void *stt_thread(void *arg)
         if (g_paused) {
             pthread_mutex_lock(&g_mic_lock);
             if (g_mic) { pclose(g_mic); g_mic = NULL; }
+            /* 收割僵尸子进程 */
+            while (waitpid(-1, NULL, WNOHANG) > 0);
             pthread_mutex_unlock(&g_mic_lock);
             while (g_running && g_paused) usleep(100000);
             /* 恢复: 重开麦克风 */

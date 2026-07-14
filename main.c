@@ -82,36 +82,9 @@ static void *ai_feed_thread(void *arg){(void)arg;
         }
         empty_streak = 0;
 
-        /* 更新标注帧缓存 */
-        {
-            size_t ns = 0;
-            const uint8_t *nd = cv_branch_get_annotated_frame(&ns);
-            if (nd && ns > 256) {
-                pthread_mutex_lock(&g_anno_lock);
-                free(g_anno_buf);
-                g_anno_buf = (uint8_t *)malloc(ns);
-                if (g_anno_buf) { memcpy(g_anno_buf, nd, ns); g_anno_len = ns; }
-                else g_anno_len = 0;
-                pthread_mutex_unlock(&g_anno_lock);
-            }
-        }
-        /* 推送标注帧, 无缓存时回退原始帧 */
-        {
-            int pushed = 0;
-            pthread_mutex_lock(&g_anno_lock);
-            if (g_anno_buf && g_anno_len > 256) {
-                gst_pipeline_push_frame(g_anno_buf, g_anno_len, f.frame_id);
-                pushed = 1;
-                static int anno_cnt=0;
-                if(++anno_cnt%30==1)printf("[PUSH] annotated frame #%d (%zu bytes)\n",anno_cnt,g_anno_len);
-            }
-            pthread_mutex_unlock(&g_anno_lock);
-            if (!pushed) {
-                gst_pipeline_push_frame(f.data, f.size, f.frame_id);
-                static int raw_cnt=0;
-                if(++raw_cnt%30==1)printf("[PUSH] raw frame #%d (%zu bytes, no annotation yet)\n",raw_cnt,f.size);
-            }
-        }
+
+        /* RTSP 推原始帧, 避免 mppjpegdec 无法解析 OpenCV 重编码帧 */
+        gst_pipeline_push_frame(f.data, f.size, f.frame_id);
 
         /* 首帧信号 */
         if(!g_first_valid_frame){
@@ -190,16 +163,26 @@ int main(void){
                 usleep(200000);  /* 等待 ASR 处理完残留帧 */
                 /* 语音监听期间按键状态冻结, 强制重置消抖状态机 */
                 button_reset();
+                /* 资源监控: 检测FD泄漏 */
+                { int nz=0; FILE *fp=popen("ls /proc/$$/fd 2>/dev/null|wc -l","r");
+                  if(fp){char zb[16]={0};fgets(zb,sizeof(zb),fp);pclose(fp);
+                    nz=atoi(zb);}
+                  fp=popen("ps aux|grep -c defunct","r");
+                  int zc=0; if(fp){char zb[16]={0};fgets(zb,sizeof(zb),fp);pclose(fp);
+                    zc=atoi(zb);}
+                  fprintf(stderr,"[RES] FDs=%d zombies=%d\n",nz,zc); }
                 const char *t=stt_get_text();
                 if(t){
                     printf("[MAIN] heard: '%s'\n", t);
                     if(stt_fuzzy_match_text(t, "电阻")||stt_fuzzy_match_text(t, "店主")||stt_fuzzy_match_text(t, "电主"))
                         { filter_override=0; do_judge=1; printf("[MAIN] → 电阻模式\n"); }
-                    else if(stt_fuzzy_match_text(t, "电容"))
+                    else if(stt_fuzzy_match_text(t, "电容")||stt_fuzzy_match_text(t, "店容")||stt_fuzzy_match_text(t, "电荣"))
                         { filter_override=1; do_judge=1; printf("[MAIN] → 电容模式\n"); }
                     else if(stt_fuzzy_match_text(t, "二极管")||stt_fuzzy_match_text(t, "二级管"))
                         { filter_override=2; do_judge=1; printf("[MAIN] → 二极管模式\n"); }
-                    else if(stt_fuzzy_match_text(t, "全部"))
+                    else if(stt_fuzzy_match_text(t, "LED")||stt_fuzzy_match_text(t, "发光二极管"))
+                        { filter_override=3; do_judge=1; printf("[MAIN] → LED模式\n"); }
+                    else if(stt_fuzzy_match_text(t, "全部")||stt_fuzzy_match_text(t, "全部统计"))
                         { filter_override=-1;do_judge=1; printf("[MAIN] → 全部模式\n"); }
                     else printf("[MAIN] no keyword matched\n");
                 } else {
@@ -215,7 +198,7 @@ int main(void){
                 if(u > 0){ /* 未知模式 — 最高优先级 */
                     printf("[JUDGE] UNKNOWN mode (count=%d)\n", u);
                     voice_unknown_mode(u);
-                } else if(tf >= 0 && tf <= 2){ /* 文字模式 */
+                } else if(tf >= 0 && tf <= 3){ /* 文字/过滤模式 */
                     printf("[JUDGE] TEXT mode (filter=%d)\n", tf);
                     voice_text_mode(tf, c);
                 } else if(d){ /* 缺损模式 */
