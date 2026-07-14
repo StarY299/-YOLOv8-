@@ -150,5 +150,8 @@ void tft_ui_update(const int counts[12], int text_filter,
         lcd_show_string(50, st2_y, (const uint8_t *)buf, YELLOW, BLACK, 12, 0);
     }
 
-    (void)has_unknown;
+    if (has_unknown > 0) {
+        snprintf(buf, sizeof(buf), "UNK:%d", has_unknown);
+        lcd_show_string(80, st2_y, (const uint8_t *)buf, YELLOW, BLACK, 12, 0);
+    }
 }

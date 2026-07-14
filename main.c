@@ -207,12 +207,15 @@ int main(void){
                 }
             }
 
-            /* 执行 JUDGE 播报 */
+            /* 执行 JUDGE 播报: UNKNOWN > TEXT > DAMAGED > GENERAL */
             if(do_judge){
-                int c[12],f,d;cv_branch_get_component_result(c,&f,&d,NULL);
+                int c[12],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);
                 int tf = (filter_override>=0) ? filter_override : f;
 
-                if(tf >= 0 && tf <= 2){ /* 文字模式 */
+                if(u > 0){ /* 未知模式 — 最高优先级 */
+                    printf("[JUDGE] UNKNOWN mode (count=%d)\n", u);
+                    voice_unknown_mode(u);
+                } else if(tf >= 0 && tf <= 2){ /* 文字模式 */
                     printf("[JUDGE] TEXT mode (filter=%d)\n", tf);
                     voice_text_mode(tf, c);
                 } else if(d){ /* 缺损模式 */

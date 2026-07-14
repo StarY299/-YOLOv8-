@@ -155,7 +155,7 @@ static void update_component_counts(const rknn_detection_t *dets, int n, int img
         if (g_cc.stable_counts[CLS_D_DAMAGED] <= 0 &&
             g_cc.ema_counts[CLS_D_DAMAGED] > 0.2f) g_cc.stable_counts[CLS_D_DAMAGED] = 1;
     }
-    g_cc.has_unknown = 0;
+    /* has_unknown 由 CV 灰度检测设置, 此处不再清零 */
 
     if (g_cc.frame_cnt % 50 == 0) {
         fprintf(stderr, "[COUNT] raw[R=%d C=%d D=%d dam=%d,%d,%d] ema[dam=%.2f,%.2f,%.2f] has_dam=%d\n",
@@ -490,7 +490,106 @@ static void process_one_frame_cv(const cv_frame_t *frame)
         // EMA平滑消抖
         smooth_detections(&rknn_res);
 
-        // 元器件计数 (在画框之前, 使用平滑后的检测结果)
+        /* ==== CV 灰度未知元件检测 ==== */
+        {
+            cv::Mat gray, otsu, morph;
+            cv::cvtColor(mat_full, gray, cv::COLOR_BGR2GRAY);
+            cv::threshold(gray, otsu, 0, 255,
+                          cv::THRESH_BINARY_INV | cv::THRESH_OTSU);
+            cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(7,7));
+            cv::morphologyEx(otsu, morph, cv::MORPH_CLOSE, kernel);
+            cv::morphologyEx(morph, morph, cv::MORPH_OPEN, kernel);
+
+            std::vector<std::vector<cv::Point>> contours;
+            cv::findContours(morph, contours, cv::RETR_EXTERNAL,
+                             cv::CHAIN_APPROX_SIMPLE);
+
+            int unk_cnt = 0;
+            static int dbg_frame = 0; dbg_frame++;
+            int do_debug = (dbg_frame % 30 == 0);
+            cv::Mat contour_img, result_img;
+            if (do_debug) {
+                contour_img = mat_full.clone();
+                result_img = mat_full.clone();
+            }
+
+            for (size_t i = 0; i < contours.size() && unk_cnt < 32; i++) {
+                cv::Rect r = cv::boundingRect(contours[i]);
+                if (r.width * r.height < 300 || r.width * r.height > 80000) continue;
+
+                bool known = false;
+                for (int j = 0; j < rknn_res.count; j++) {
+                    int cid = rknn_res.detections[j].class_id;
+                    if (cid >= CLS_TEXT_R && cid <= CLS_TEXT_D) continue;
+                    if (cid == CLS_TRANSISTOR) continue;
+                    cv::Rect kr(rknn_res.detections[j].x, rknn_res.detections[j].y,
+                                rknn_res.detections[j].w, rknn_res.detections[j].h);
+                    int dw = kr.width*10/100, dh = kr.height*10/100;
+                    kr.x -= dw; kr.width += dw*2;
+                    kr.y -= dh; kr.height += dh*2;
+                    cv::Rect inter = r & kr;
+                    if (inter.area() > 0 && (float)inter.area()/r.area() >= 0.55f)
+                        { known = true; break; }
+                }
+
+                if (do_debug)
+                    cv::rectangle(contour_img, r, known ? cv::Scalar(0,255,0):cv::Scalar(0,255,255), known?1:2);
+
+                if (known) continue;
+
+                int idx = rknn_res.count + unk_cnt;
+                if (idx >= 52) break;
+                rknn_res.detections = (rknn_detection_t *)realloc(
+                    rknn_res.detections, (idx+1)*sizeof(rknn_detection_t));
+                rknn_res.detections[idx].class_id = -1;
+                rknn_res.detections[idx].confidence = 0.0f;
+                rknn_res.detections[idx].x=r.x; rknn_res.detections[idx].y=r.y;
+                rknn_res.detections[idx].w=r.width; rknn_res.detections[idx].h=r.height;
+                snprintf(rknn_res.detections[idx].label,64,"Unknown");
+                if (do_debug) {
+                    cv::rectangle(result_img, r, cv::Scalar(0,255,255), 2);
+                    cv::putText(result_img,"UNK",cv::Point(r.x,r.y-3),
+                                cv::FONT_HERSHEY_SIMPLEX,0.5,cv::Scalar(0,255,255),2);
+                }
+                unk_cnt++;
+            }
+            rknn_res.count += unk_cnt;
+
+            /* 滑动窗口: 150帧(5秒)内>20%帧有未知 → 触发 */
+            #define UNK_WINDOW 150
+            static int unk_hist[UNK_WINDOW] = {0};
+            static int unk_idx = 0, unk_win_cnt = 0;
+            unk_win_cnt -= unk_hist[unk_idx];
+            unk_hist[unk_idx] = (unk_cnt > 0) ? 1 : 0;
+            unk_win_cnt += unk_hist[unk_idx];
+            unk_idx = (unk_idx + 1) % UNK_WINDOW;
+
+            /* EMA 平滑未知数量 */
+            static float unk_ema = 0.0f;
+            unk_ema = unk_ema * 0.7f + (float)unk_cnt * 0.3f;
+            int unk_stable = (int)(unk_ema + 0.5f);
+
+            pthread_mutex_lock(&g_cc.lock);
+            g_cc.has_unknown = (unk_win_cnt > UNK_WINDOW * 15 / 100) ? unk_stable : 0;
+            pthread_mutex_unlock(&g_cc.lock);
+
+            if (do_debug && unk_cnt > 0) {
+                char p[256];
+                snprintf(p,sizeof(p),"/userdata/debug/%04d_gray.jpg",dbg_frame);
+                cv::imwrite(p,gray);
+                snprintf(p,sizeof(p),"/userdata/debug/%04d_otsu.jpg",dbg_frame);
+                cv::imwrite(p,otsu);
+                snprintf(p,sizeof(p),"/userdata/debug/%04d_morph.jpg",dbg_frame);
+                cv::imwrite(p,morph);
+                snprintf(p,sizeof(p),"/userdata/debug/%04d_contour.jpg",dbg_frame);
+                cv::imwrite(p,contour_img);
+                snprintf(p,sizeof(p),"/userdata/debug/%04d_result.jpg",dbg_frame);
+                cv::imwrite(p,result_img);
+                fprintf(stderr,"[UNK] frame=%d unknown=%d\n",dbg_frame,unk_cnt);
+            }
+        }
+
+        // 元器件计数
         update_component_counts(rknn_res.detections, rknn_res.count, mat_full.rows);
 
         // 画检测框

@@ -58,6 +58,17 @@ int voice_play(const char *name)
 
 int voice_ready(void) { return voice_play("ready"); }
 
+/* ---- 未知模式: 播报未知元件 ---- */
+void voice_unknown_mode(int unknown_count)
+{
+    if (unknown_count <= 0) return;
+    g_cmd[0]=0; g_nfiles=0;
+    add_file("unknown");
+    add_num(unknown_count);
+    add_file("ge");
+    play_all();
+}
+
 /* ---- 文字模式: 仅播报一种元件 ---- */
 void voice_text_mode(int text_filter, const int counts[12])
 {

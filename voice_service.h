@@ -24,6 +24,9 @@ void voice_damaged_mode(const int counts[12]);
 /* 通用模式: 播报全部正常元件 */
 void voice_general_mode(const int counts[12]);
 
+/* 未知模式: 播报未知元件数量 (优先级最高) */
+void voice_unknown_mode(int unknown_count);
+
 #ifdef __cplusplus
 }
 #endif

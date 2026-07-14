@@ -40,11 +40,11 @@ using namespace cv;
  * 手写文字(8-10): 阈值中等, 文字区域小但特征清晰
  */
 static const float CONF_THRESH_PER_CLASS[11] = {
-    0.30f,  /* 0: Capacitor */
+    0.50f,  /* 0: Capacitor */
     0.30f,  /* 1: Diode */
     0.30f,  /* 2: Transistor */
     0.30f,  /* 3: Resister */
-    0.30f,  /* 4: LED */
+    0.40f,  /* 4: LED */
     0.25f,  /* 5: Capacitor-damage */
     0.25f,  /* 6: Resister-damage */
     0.25f,  /* 7: dianzu */
