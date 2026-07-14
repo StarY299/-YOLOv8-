@@ -16,6 +16,8 @@ void tft_ui_init(void);
 /**
  * 更新元器件计数显示
  */
+void tft_ui_stt_listening(void);
+void tft_ui_stt_result(const char *text, const char *mode);
 void tft_ui_update(const int counts[13], int text_filter,
                    int has_damaged, int has_unknown);
 

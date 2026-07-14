@@ -47,25 +47,25 @@ static void *stt_thread(void *arg)
     /* 打开麦克风 */
     pthread_mutex_lock(&g_mic_lock);
     g_mic = popen(
-        "arecord -q -f cd -t raw - 2>/dev/null | "
+        "timeout 30 arecord -q -f cd -t raw - 2>/dev/null | "
         "sox -q -t raw -r 44100 -e signed -b 16 -c 2 - "
         "-t raw -r 16000 -c 1 -e float - 2>/dev/null", "r");
     pthread_mutex_unlock(&g_mic_lock);
     if (!g_mic) { perror("[STT] mic"); return NULL; }
 
     while (g_running) {
-        /* 暂停检查: 关闭/重开麦克风 */
+        /* 暂停: 关闭麦克风 */
         if (g_paused) {
             pthread_mutex_lock(&g_mic_lock);
             if (g_mic) { pclose(g_mic); g_mic = NULL; }
-            /* 收割僵尸子进程 */
             while (waitpid(-1, NULL, WNOHANG) > 0);
             pthread_mutex_unlock(&g_mic_lock);
             while (g_running && g_paused) usleep(100000);
-            /* 恢复: 重开麦克风 */
+            /* 恢复前等300ms让USB稳定 */
+            usleep(300000);
             pthread_mutex_lock(&g_mic_lock);
             g_mic = popen(
-                "arecord -q -f cd -t raw - 2>/dev/null | "
+                "timeout 30 arecord -q -f cd -t raw - 2>/dev/null | "
                 "sox -q -t raw -r 44100 -e signed -b 16 -c 2 - "
                 "-t raw -r 16000 -c 1 -e float - 2>/dev/null", "r");
             pthread_mutex_unlock(&g_mic_lock);
