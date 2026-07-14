@@ -42,7 +42,7 @@ static void play_all(void)
 {
     if (g_nfiles == 0) return;
     snprintf(g_cmd + strlen(g_cmd), CMD_LEN - strlen(g_cmd),
-             " -t wav - 2>/dev/null | aplay 2>/dev/null");
+             " -t wav - | aplay");
     system(g_cmd);
     g_cmd[0] = '\0'; g_nfiles = 0;
 }
@@ -110,7 +110,6 @@ void voice_damaged_mode(const int counts[13])
         add_num(counts[m]);
         add_file("ge");
     }
-    fprintf(stderr, "[VOICE-GEN] any=%d, playing...\n", any);
     if (any) play_all();
     else { g_cmd[0]=0; g_nfiles=0; }
 }
@@ -118,7 +117,6 @@ void voice_damaged_mode(const int counts[13])
 /* ---- 通用模式: 播报全部正常元件 ---- */
 void voice_general_mode(const int counts[13])
 {
-    /* 正常元件: 3=R, 0=C, 1=D, 2=T, 4=LED */
     int order[] = {3, 0, 1, 4, 11, 12};
     int any = 0;
 
@@ -127,14 +125,14 @@ void voice_general_mode(const int counts[13])
 
     for (int i = 0; i < 6; i++) {
         int m = order[i];
-        fprintf(stderr, "[VOICE-GEN] cls=%d count=%d\n", m, counts[m]);
+        fprintf(stderr, "[GEN] m=%d cnt=%d\n", m, counts[m]);
         if (counts[m] <= 0) continue;
         any = 1;
         if (type_wav[m]) add_file(type_wav[m]);
         add_num(counts[m]);
         add_file("ge");
     }
-    fprintf(stderr, "[VOICE-GEN] any=%d, playing...\n", any);
+    fprintf(stderr, "[GEN] any=%d nfiles=%d cmd=%s\n", any, g_nfiles, g_cmd);
     if (any) play_all();
     else { g_cmd[0]=0; g_nfiles=0; }
 }

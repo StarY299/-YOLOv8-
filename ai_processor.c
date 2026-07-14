@@ -178,7 +178,7 @@ void cv_branch_get_component_result(int counts[12], int *text_filter,
     pthread_mutex_lock(&g_cc.lock);
 
     /* 直接返回原始模型计数 (12类) */
-    memcpy(counts, g_cc.stable_counts, sizeof(int) * 12);
+    memcpy(counts, g_cc.stable_counts, sizeof(int) * 13);
 
     if (text_filter) *text_filter = g_cc.text_filter;
     if (has_damaged) *has_damaged = g_cc.has_damaged;
