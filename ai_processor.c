@@ -52,12 +52,14 @@ enum {
     CLS_D_DAMAGED = 10,
     CLS_POT        = 11,
     CLS_CONNECTER  = 12,
-    CLS_COUNT     = 13
+    CLS_XTAL       = 13,
+    CLS_IC         = 14,
+    CLS_COUNT     = 15
 };
 
 /* 显示用名称: 按模型ID索引 */
 static const char *g_class_names[CLS_COUNT] = {
-    "C","D","T","R","LED","C-dam","R-dam","txtR","txtC","txtD","D-dam","Pot","Con"
+    "C","D","T","R","LED","C-dam","R-dam","txtR","txtC","txtD","D-dam","Pot","Con","Xtal","IC"
 };
 
 /* 判断是否缺损类 (Cap-dam=5, Res-dam=6, Diode-dam=10) */
@@ -172,13 +174,13 @@ static void update_component_counts(const rknn_detection_t *dets, int n, int img
 }
 
 /* ---- 对外 API: 获取计数结果 (线程安全) ---- */
-void cv_branch_get_component_result(int counts[12], int *text_filter,
+void cv_branch_get_component_result(int counts[15], int *text_filter,
                                      int *has_damaged, int *has_unknown)
 {
     pthread_mutex_lock(&g_cc.lock);
 
     /* 直接返回原始模型计数 (12类) */
-    memcpy(counts, g_cc.stable_counts, sizeof(int) * 13);
+    memcpy(counts, g_cc.stable_counts, sizeof(int) * 15);
 
     if (text_filter) *text_filter = g_cc.text_filter;
     if (has_damaged) *has_damaged = g_cc.has_damaged;
@@ -403,6 +405,8 @@ static void draw_detections(cv::Mat &mat, rknn_result_t *rknn_res)
         cv::Scalar(  0,165,255), //10 D-dam       橙
         cv::Scalar(255,255,  0), //11 Pot         青
         cv::Scalar(255,100,  0), //12 Connecter   天蓝
+        cv::Scalar(255,255,  0), //13 Xtal        青
+        cv::Scalar(200,200,  0), //14 IC          浅青
     };
     const int n_colors = sizeof(colors) / sizeof(colors[0]);
 

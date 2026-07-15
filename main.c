@@ -25,10 +25,15 @@
 #define CAP_FPS          30
 #define H264_BITRATE     4000000
 #define QUEUE_SIZE       4
-#define MODEL_PATH       "/userdata/best5-i8.rknn"
+#define MODEL_PATH       "/userdata/best-final-i8.rknn"
 
 static volatile int running = 1;
 static int filter_override = -1; /* 语音命令设置的过滤 */
+static volatile int g_first_valid_frame = 0;
+static pthread_mutex_t g_start_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  g_start_cond = PTHREAD_COND_INITIALIZER;
+static uint8_t *g_anno_buf=NULL;static size_t g_anno_len=0;
+static pthread_mutex_t g_anno_lock=PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct { uint8_t *data; size_t size; int64_t frame_id; } queued_frame_t;
 typedef struct {
@@ -78,7 +83,39 @@ static void *ai_feed_thread(void *arg){(void)arg;
         empty_streak = 0;
 
 
-        /* RTSP推流已禁用, 只喂AI */
+        /* 更新标注帧缓存 */
+        {
+            size_t ns = 0;
+            const uint8_t *nd = cv_branch_get_annotated_frame(&ns);
+            if (nd && ns > 256) {
+                pthread_mutex_lock(&g_anno_lock);
+                free(g_anno_buf);
+                g_anno_buf = (uint8_t *)malloc(ns);
+                if (g_anno_buf) { memcpy(g_anno_buf, nd, ns); g_anno_len = ns; }
+                else g_anno_len = 0;
+                pthread_mutex_unlock(&g_anno_lock);
+            }
+        }
+        /* 推送标注帧, 无缓存时回退原始帧 */
+        {
+            int pushed = 0;
+            pthread_mutex_lock(&g_anno_lock);
+            if (g_anno_buf && g_anno_len > 256) {
+                gst_pipeline_push_frame(g_anno_buf, g_anno_len, f.frame_id);
+                pushed = 1;
+            }
+            pthread_mutex_unlock(&g_anno_lock);
+            if (!pushed)
+                gst_pipeline_push_frame(f.data, f.size, f.frame_id);
+        }
+
+        /* 首帧信号 */
+        if(!g_first_valid_frame){
+            pthread_mutex_lock(&g_start_lock);
+            g_first_valid_frame = 1;
+            pthread_cond_signal(&g_start_cond);
+            pthread_mutex_unlock(&g_start_lock);
+        }
 
         /* 喂 AI */
         cv_frame_t cvf;cvf.data=f.data;cvf.size=f.size;cvf.width=CAP_WIDTH;cvf.height=CAP_HEIGHT;cvf.stride=0;
@@ -101,7 +138,7 @@ int main(void){
 
     char cap_dev[128];if(capture_find_device(cap_dev,sizeof(cap_dev))!=0){fprintf(stderr,"FATAL: no camera\n");return -1;}
     if(capture_init(cap_dev,CAP_WIDTH,CAP_HEIGHT,CAP_FPS)!=0)return -1;
-    /* RTSP disabled */ gst_pipeline_init(CAP_WIDTH,CAP_HEIGHT,CAP_FPS,H264_BITRATE);
+    if(gst_pipeline_init(CAP_WIDTH,CAP_HEIGHT,CAP_FPS,H264_BITRATE)!=0){capture_deinit();return -1;}
 
     cv_branch_config_t cv_cfg={.max_queue_size=2,.on_result=on_ai_result,.model_path=MODEL_PATH};
     cv_branch_init(&cv_cfg);
@@ -111,7 +148,21 @@ int main(void){
     pthread_create(&cap_tid,NULL,capture_thread,NULL);
     pthread_create(&feed_tid,NULL,ai_feed_thread,NULL);
 
-    /* RTSP/mediamtx disabled */
+    /* 等待首帧流入管线后启动 mediamtx */
+    {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += 15;
+        pthread_mutex_lock(&g_start_lock);
+        while (!g_first_valid_frame && running) {
+            if (pthread_cond_timedwait(&g_start_cond, &g_start_lock, &ts) != 0)
+                break;
+        }
+        pthread_mutex_unlock(&g_start_lock);
+        printf("[MAIN] first frame %s, starting mediamtx\n",
+               g_first_valid_frame ? "OK" : "TIMEOUT");
+    }
+    if(start_mediamtx()!=0)fprintf(stderr,"WARN: mediamtx\n");
 
     printf("\n=== System Ready (WAIT) ===\n");voice_ready();
     printf("Key 0=JUDGE  Key 2=voice command\n");
@@ -148,7 +199,9 @@ int main(void){
                 if(t){
                     printf("[MAIN] heard: '%s'\n", t);
                     tft_ui_stt_result(t, NULL);
-                    if(stt_fuzzy_match_text(t, "电阻")||stt_fuzzy_match_text(t, "店主")||stt_fuzzy_match_text(t, "电主"))
+                    if(stt_fuzzy_match_text(t, "芯片")||stt_fuzzy_match_text(t, "集成电路"))
+                        { filter_override=7; do_judge=1; printf("[MAIN] → 芯片模式\n"); tft_ui_stt_result(t,"IC"); }
+                    else if(stt_fuzzy_match_text(t, "电阻")||stt_fuzzy_match_text(t, "店主")||stt_fuzzy_match_text(t, "电主"))
                         { filter_override=0; do_judge=1; printf("[MAIN] → 电阻模式\n"); tft_ui_stt_result(t,"Resistor"); }
                     else if(stt_fuzzy_match_text(t, "电容")||stt_fuzzy_match_text(t, "店容")||stt_fuzzy_match_text(t, "电荣"))
                         { filter_override=1; do_judge=1; printf("[MAIN] → 电容模式\n"); tft_ui_stt_result(t,"Capacitor"); }
@@ -160,6 +213,9 @@ int main(void){
                         { filter_override=4; do_judge=1; printf("[MAIN] → 电位器模式\n"); tft_ui_stt_result(t,"Pot"); }
                     else if(stt_fuzzy_match_text(t, "连接器")||stt_fuzzy_match_text(t, "链接器"))
                         { filter_override=5; do_judge=1; printf("[MAIN] → 连接器模式\n"); tft_ui_stt_result(t,"Connecter"); }
+                    else if(stt_fuzzy_match_text(t, "晶振")||stt_fuzzy_match_text(t, "晶体")||stt_fuzzy_match_text(t, "金正")||stt_fuzzy_match_text(t, "金证")||stt_fuzzy_match_text(t, "精证")||stt_fuzzy_match_text(t, "经正"))
+                        { filter_override=6; do_judge=1; printf("[MAIN] → 晶振模式\n"); tft_ui_stt_result(t,"Xtal"); }
+
                     else if(stt_fuzzy_match_text(t, "全部")||stt_fuzzy_match_text(t, "全部统计"))
                         { filter_override=-1;do_judge=1; printf("[MAIN] → 全部模式\n"); tft_ui_stt_result(t,"All"); }
                     else { printf("[MAIN] no keyword matched\n"); tft_ui_stt_result(t,"No match"); }
@@ -171,10 +227,10 @@ int main(void){
 
             /* 执行 JUDGE 播报: UNKNOWN > TEXT > DAMAGED > GENERAL */
             if(do_judge){
-                int c[13],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);
+                int c[15],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);
                 int tf = (filter_override>=0) ? filter_override : f;
 
-                if(tf >= 0 && tf <= 5){ /* 过滤模式 — 最高优先级 */
+                if(tf >= 0 && tf <= 7){ /* 过滤模式 — 最高优先级 */
                     printf("[JUDGE] TEXT mode (filter=%d)\n", tf);
                     voice_text_mode(tf, c);
                 } else if(u > 0){ /* 未知模式 */
@@ -195,17 +251,25 @@ int main(void){
             if(stt_ok)stt_get_text();  /* 清除残留STT文本 */
             /* TFT 5Hz刷新 (每200ms) */
             static int tft_cnt=0;
-            if(++tft_cnt%10==0){int c[13],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
+            if(++tft_cnt%10==0){int c[15],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
         }
         tick++;
+        if(tick%5==0){
+            pid_t pid = get_mediamtx_pid();
+            if(pid > 0 && kill(pid, 0) != 0){
+                printf("[MAIN] mediamtx dead (pid=%d), restarting...\n", pid);
+                waitpid(pid, NULL, WNOHANG);
+                start_mediamtx();
+            }
+        }
         if(tick%30==0){int64_t in,out,drop;cv_branch_get_stats(&in,&out,&drop);
             printf("[STATS] cv(in=%lld out=%lld drop=%lld)\n",(long long)in,(long long)out,(long long)drop);}
 
     }
 
     printf("\n=== Shutting down ===\n");
-    stt_deinit();/* mediamtx disabled */button_deinit();
+    stt_deinit();free(g_anno_buf);stop_mediamtx();button_deinit();
     pthread_cond_broadcast(&g_queue.cond);pthread_join(cap_tid,NULL);pthread_join(feed_tid,NULL);
-    cv_branch_deinit();tft_display_deinit();/* gst disabled */capture_deinit();
+    cv_branch_deinit();tft_display_deinit();gst_pipeline_deinit();capture_deinit();
     printf("=== Done ===\n");return 0;
 }

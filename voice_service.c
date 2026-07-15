@@ -27,6 +27,8 @@ static const char *type_wav[] = {
     "diode",      /*10: D-dam */
     "Pot",        /*11: 电位器 */
     "Connecter",  /*12: 连接器 */
+    "Xtal",       /*13: 晶振 */
+    "IC",         /*14: 芯片 */
 };
 
 static void add_file(const char *name)
@@ -73,7 +75,7 @@ void voice_unknown_mode(int unknown_count)
 /* ---- 文字模式: 仅播报一种元件 ---- */
 void voice_text_mode(int text_filter, const int counts[13])
 {
-    static const int map[] = {3, 0, 1, 4, 11, 12}; /* 0=R 1=C 2=D 3=LED 4=Pot 5=Con */
+    static const int map[] = {3, 0, 1, 4, 11, 12, 13, 14}; /* 0=R 1=C 2=D 3=LED 4=Pot 5=Con 6=Xtal 7=IC */
     int m = map[text_filter];
 
     g_cmd[0]=0; g_nfiles=0;
@@ -117,13 +119,13 @@ void voice_damaged_mode(const int counts[13])
 /* ---- 通用模式: 播报全部正常元件 ---- */
 void voice_general_mode(const int counts[13])
 {
-    int order[] = {3, 0, 1, 4, 11, 12};
+    int order[] = {3, 0, 1, 4, 11, 12, 13, 14};
     int any = 0;
 
     g_cmd[0]=0; g_nfiles=0;
     add_file("detect");
 
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 8; i++) {
         int m = order[i];
         fprintf(stderr, "[GEN] m=%d cnt=%d\n", m, counts[m]);
         if (counts[m] <= 0) continue;

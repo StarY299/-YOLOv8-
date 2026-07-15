@@ -11,6 +11,7 @@ extern "C" {
 /**
  * 创建 UI 控件 (屏幕 + 标签)
  */
+void tft_ui_splash(void);
 void tft_ui_init(void);
 
 /**
@@ -18,7 +19,7 @@ void tft_ui_init(void);
  */
 void tft_ui_stt_listening(void);
 void tft_ui_stt_result(const char *text, const char *mode);
-void tft_ui_update(const int counts[13], int text_filter,
+void tft_ui_update(const int counts[15], int text_filter,
                    int has_damaged, int has_unknown);
 
 #ifdef __cplusplus
