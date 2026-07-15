@@ -115,7 +115,7 @@ static void update_component_counts(const rknn_detection_t *dets, int n, int img
         if (cid < 0 || cid >= CLS_COUNT) continue;
         if (dets[i].confidence < DET_CONF_MIN) continue;
         /* 文字类别不参与元件计数, 由 detect_text_filter 单独处理 */
-        if (cid >= CLS_TEXT_R && cid <= CLS_TEXT_D) continue;
+        if (cid == CLS_TRANSISTOR) continue;
         if (cid == CLS_TRANSISTOR) continue;
         raw[cid] += 1.0f;
     }
@@ -516,7 +516,7 @@ static void process_one_frame_cv(const cv_frame_t *frame)
                 bool known = false;
                 for (int j = 0; j < rknn_res.count; j++) {
                     int cid = rknn_res.detections[j].class_id;
-                    if (cid >= CLS_TEXT_R && cid <= CLS_TEXT_D) continue;
+                    if (cid == CLS_TRANSISTOR) continue;
                     if (cid == CLS_TRANSISTOR) continue;
                     cv::Rect kr(rknn_res.detections[j].x, rknn_res.detections[j].y,
                                 rknn_res.detections[j].w, rknn_res.detections[j].h);

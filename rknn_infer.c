@@ -153,7 +153,7 @@ static int cmp_conf_desc(const void *a, const void *b) {
  *   4. IoU < threshold → 作为新目标加入融合列表
  *   5. 最终输出融合后的框, 置信度 = 加权平均
  */
-#define WBF_THRESHOLD  0.55f   /* IoU > 此值时融合, ≤此值时独立 */
+#define WBF_THRESHOLD  0.60f   /* IoU > 此值时融合, ≤此值时独立 */
 
 static int nms(raw_box_t *boxes, int n, float threshold)
 {

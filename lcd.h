@@ -91,3 +91,5 @@ void lcd_backlight_off(void);
 int lcd_get_spi_fd(void);
 
 #endif
+void lcd_show_cn_custom(uint16_t x,uint16_t y,const uint8_t *s,uint16_t fc,uint16_t bc);
+void lcd_show_cn12_custom(uint16_t x,uint16_t y,const uint8_t *s,uint16_t fc,uint16_t bc);

@@ -247,11 +247,13 @@ int main(void){
                 /* 播报完成后回到 WAIT 等待模式, 清除语音过滤 */
                 filter_override = -1;
                 printf("[MAIN] → WAIT\n");
+                /* 立即恢复计数页 */
+                { int c[15],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u); }
             }
             if(stt_ok)stt_get_text();  /* 清除残留STT文本 */
             /* TFT 5Hz刷新 (每200ms) */
             static int tft_cnt=0;
-            if(++tft_cnt%10==0){int c[15],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
+            if(++tft_cnt%5==0){int c[15],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
         }
         tick++;
         if(tick%5==0){

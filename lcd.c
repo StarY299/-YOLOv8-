@@ -6,6 +6,7 @@
  */
 #include "lcd.h"
 #include "lcdfont.h"
+#include "cn_font.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -264,6 +265,55 @@ void lcd_draw_circle(uint16_t x0, uint16_t y0, uint8_t r, uint16_t color) {
 
 // 显示内置中文字符串 (GB2312编码, 从tfont数组查找)
 // sizey: 12/16/24/32
+
+/* 自定义16x16中文显示 */
+
+/* 自定义12x12中文显示 */
+void lcd_show_cn12_custom(uint16_t x, uint16_t y, const uint8_t *s, uint16_t fc, uint16_t bc)
+{
+    while (*s) {
+        int found = 0;
+        for (int i = 0; i < 54; i++) {
+            if (tfont12_custom[i].Index[0] == s[0] && tfont12_custom[i].Index[1] == s[1]) {
+                lcd_set_address(x, y, x + 15, y + 11);
+                for (int j = 0; j < 24; j++) {
+                    uint8_t d = tfont12_custom[i].Msk[j];
+                    for (int k = 0; k < 8; k++) {
+                        if (d & 0x80) lcd_write_data16(fc); else lcd_write_data16(bc);
+                        d <<= 1;
+                    }
+                }
+                x += 12; s += 2; found = 1; break;
+            }
+        }
+        if (!found) { s += 2; x += 12; }
+    }
+}
+
+void lcd_show_cn_custom(uint16_t x, uint16_t y, const uint8_t *s,
+                         uint16_t fc, uint16_t bc)
+{
+    while (*s) {
+        int found = 0;
+        for (int i = 0; i < 55; i++) {
+            if (tfont16_custom[i].Index[0] == s[0] &&
+                tfont16_custom[i].Index[1] == s[1]) {
+                lcd_set_address(x, y, x + 15, y + 15);
+                for (int j = 0; j < 32; j++) {
+                    uint8_t d = tfont16_custom[i].Msk[j];
+                    for (int k = 0; k < 8; k++) {
+                        if (d & 0x80) lcd_write_data16(fc);
+                        else lcd_write_data16(bc);
+                        d <<= 1;
+                    }
+                }
+                x += 16; s += 2; found = 1; break;
+            }
+        }
+        if (!found) { s += 2; x += 16; }
+    }
+}
+
 void lcd_show_builtin_cn(uint16_t x, uint16_t y, const uint8_t *s,
                          uint16_t fc, uint16_t bc, uint8_t sizey) {
     uint16_t x0 = x;
