@@ -273,7 +273,7 @@ void lcd_show_cn12_custom(uint16_t x, uint16_t y, const uint8_t *s, uint16_t fc,
 {
     while (*s) {
         int found = 0;
-        for (int i = 0; i < 54; i++) {
+        for (int i = 0; i < 56; i++) {
             if (tfont12_custom[i].Index[0] == s[0] && tfont12_custom[i].Index[1] == s[1]) {
                 lcd_set_address(x, y, x + 15, y + 11);
                 for (int j = 0; j < 24; j++) {
@@ -295,7 +295,7 @@ void lcd_show_cn_custom(uint16_t x, uint16_t y, const uint8_t *s,
 {
     while (*s) {
         int found = 0;
-        for (int i = 0; i < 55; i++) {
+        for (int i = 0; i < 56; i++) {
             if (tfont16_custom[i].Index[0] == s[0] &&
                 tfont16_custom[i].Index[1] == s[1]) {
                 lcd_set_address(x, y, x + 15, y + 15);

@@ -18,8 +18,10 @@ static const uint8_t CN_POT[]      = {0xB5,0xE7,0xCE,0xBB,0xC6,0xF7,0x00}; /* �
 static const uint8_t CN_CONNECTER[]= {0xC1,0xAC,0xBD,0xD3,0xC6,0xF7,0x00}; /* 连接器 */
 static const uint8_t CN_XTAL[]     = {0xBE,0xA7,0xD5,0xF1,0x00};       /* 晶振 */
 static const uint8_t CN_IC[]       = {0xD0,0xBE,0xC6,0xAC,0x00};       /* 芯片 */
-static const uint8_t *cn_names[] = {CN_RESISTOR,CN_CAPACITOR,CN_DIODE,CN_LED,CN_POT,CN_CONNECTER,CN_XTAL,CN_IC};
-static const uint8_t *cn_filter[] = {CN_RESISTOR,CN_CAPACITOR,CN_DIODE,CN_LED,CN_POT,CN_CONNECTER,CN_XTAL,CN_IC};
+static const uint8_t CN_TRANSISTOR[]={0xC8,0xFD,0xBC,0xAB,0xB9,0xDC,0x00}; /* 三极管 */
+static const uint8_t CN_INDUCTOR[]  ={0xB5,0xE7,0xB8,0xD0,0x00}; /* 电感 */
+static const uint8_t *cn_names[] = {CN_RESISTOR,CN_CAPACITOR,CN_DIODE,CN_TRANSISTOR,CN_LED,CN_CONNECTER,CN_XTAL,CN_INDUCTOR};
+static const uint8_t *cn_filter[] = {CN_RESISTOR,CN_CAPACITOR,CN_DIODE,CN_TRANSISTOR,CN_LED,CN_CONNECTER,CN_XTAL,CN_INDUCTOR};
 
 static const uint8_t CN_SYSNAME[] = {0xD4,0xAA,0xC6,0xF7,0xBC,0xFE,0xCA,0xB6,0xB1,0xF0,0xD7,0xB0,0xD6,0xC3,0x00}; /* 元器件识别装置 */
 static const uint8_t CN_TITLE[]    = {0xD4,0xAA,0xC6,0xF7,0xBC,0xFE,0x41,0x49,0x00}; /* 元器件AI */
@@ -42,8 +44,8 @@ static const uint8_t CN_NOMATCH[]  = {0xCE,0xDE,0xC6,0xA5,0xC5,0xE4,0x00}; /* �
 static const uint8_t CN_RETRY[]    = {0xC7,0xEB,0xD6,0xD8,0xCA,0xD4,0x00}; /* 请重试 */
 static const uint8_t CN_ALLUNK[]   = {0xC8,0xAB,0xB2,0xBF,0xCE,0xB4,0xD6,0xAA,0x00}; /* 全部未知 */
 
-static const int g_comp_id[] = {3,0,1,4,11,12,13,14};
-static const uint16_t g_colors[] = {GREEN,BLUE,RED,MAGENTA,YELLOW,0x4BFF,CYAN,WHITE};
+static const int g_comp_id[] = {3,0,1,2,4,12,13,15};
+static const uint16_t g_colors[] = {GREEN,BLUE,0xFD20,YELLOW,MAGENTA,CYAN,WHITE,0xFC10};  /* R/C/D/T/LED/Con/Xtal/L */
 #define N 8
 
 /* 电路符号 */
@@ -120,7 +122,7 @@ void tft_ui_init(void){
     lcd_draw_line(0,15,LCD_W,15,0x4208);
 }
 
-void tft_ui_update(const int counts[15], int tf, int dam, int unk){
+void tft_ui_update(const int counts[16], int tf, int dam, int unk){
     char b[8]; int rh=14, y0=17;
     /* 重绘标题栏(覆盖STT页面残留) */
     lcd_fill(0,0,LCD_W,15,DARKBLUE);
@@ -135,7 +137,7 @@ void tft_ui_update(const int counts[15], int tf, int dam, int unk){
         if(i>0)lcd_draw_line(4,y,LCD_W-4,y,0x4208);
         snprintf(b,sizeof(b),"%d",c);
         show_asc(2,y+1,(uint8_t*)b,fg,bg);
-        if(i==3) show_asc(20,y,(uint8_t*)"LED",clr,bg); else show_cn(16,y,cn_names[i],clr,bg);
+        if(i==4) show_asc(20,y,(uint8_t*)"LED",clr,bg); else show_cn(16,y,cn_names[i],clr,bg);
         if(g_sym[i])g_sym[i](106,y+2,clr);
     }
     int sy=y0+N*rh+1; lcd_draw_line(0,sy,LCD_W,sy,0x4208);

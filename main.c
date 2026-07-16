@@ -25,7 +25,7 @@
 #define CAP_FPS          30
 #define H264_BITRATE     4000000
 #define QUEUE_SIZE       4
-#define MODEL_PATH       "/userdata/best-final-i8.rknn"
+#define MODEL_PATH       "/userdata/best6-i8.rknn"
 
 static volatile int running = 1;
 static int filter_override = -1; /* 语音命令设置的过滤 */
@@ -209,13 +209,16 @@ int main(void){
                         { filter_override=2; do_judge=1; printf("[MAIN] → 二极管模式\n"); tft_ui_stt_result(t,"Diode"); }
                     else if(stt_fuzzy_match_text(t, "LED")||stt_fuzzy_match_text(t, "发光二极管"))
                         { filter_override=3; do_judge=1; printf("[MAIN] → LED模式\n"); tft_ui_stt_result(t,"LED"); }
-                    else if(stt_fuzzy_match_text(t, "电位器")||stt_fuzzy_match_text(t, "点位器")||stt_fuzzy_match_text(t, "继电器")||stt_fuzzy_match_text(t, "定位器")||stt_fuzzy_match_text(t, "定位机"))
-                        { filter_override=4; do_judge=1; printf("[MAIN] → 电位器模式\n"); tft_ui_stt_result(t,"Pot"); }
+                    
                     else if(stt_fuzzy_match_text(t, "连接器")||stt_fuzzy_match_text(t, "链接器"))
                         { filter_override=5; do_judge=1; printf("[MAIN] → 连接器模式\n"); tft_ui_stt_result(t,"Connecter"); }
                     else if(stt_fuzzy_match_text(t, "晶振")||stt_fuzzy_match_text(t, "晶体")||stt_fuzzy_match_text(t, "金正")||stt_fuzzy_match_text(t, "金证")||stt_fuzzy_match_text(t, "精证")||stt_fuzzy_match_text(t, "经正"))
                         { filter_override=6; do_judge=1; printf("[MAIN] → 晶振模式\n"); tft_ui_stt_result(t,"Xtal"); }
 
+                    else if(stt_fuzzy_match_text(t, "三极管")||stt_fuzzy_match_text(t, "晶体三极管"))
+                        { filter_override=3; do_judge=1; printf("[MAIN] → 三极管模式\n"); tft_ui_stt_result(t,"Transistor"); }
+                    else if(stt_fuzzy_match_text(t, "电感")||stt_fuzzy_match_text(t, "电杆"))
+                        { filter_override=7; do_judge=1; printf("[MAIN] → 电感模式\n"); tft_ui_stt_result(t,"Inductor"); }
                     else if(stt_fuzzy_match_text(t, "全部")||stt_fuzzy_match_text(t, "全部统计"))
                         { filter_override=-1;do_judge=1; printf("[MAIN] → 全部模式\n"); tft_ui_stt_result(t,"All"); }
                     else { printf("[MAIN] no keyword matched\n"); tft_ui_stt_result(t,"No match"); }
@@ -259,11 +262,11 @@ int main(void){
         if(tick%5==0){
             pid_t pid = get_mediamtx_pid();
             if(pid > 0 && kill(pid, 0) != 0){
-                printf("[MAIN] mediamtx dead (pid=%d), restarting...\n", pid);
                 waitpid(pid, NULL, WNOHANG);
                 start_mediamtx();
             }
         }
+
         if(tick%30==0){int64_t in,out,drop;cv_branch_get_stats(&in,&out,&drop);
             printf("[STATS] cv(in=%lld out=%lld drop=%lld)\n",(long long)in,(long long)out,(long long)drop);}
 

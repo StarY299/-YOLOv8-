@@ -54,12 +54,13 @@ enum {
     CLS_CONNECTER  = 12,
     CLS_XTAL       = 13,
     CLS_IC         = 14,
-    CLS_COUNT     = 15
+    CLS_INDUCTOR   = 15,  /* 电感 */
+    CLS_COUNT     = 16
 };
 
 /* 显示用名称: 按模型ID索引 */
 static const char *g_class_names[CLS_COUNT] = {
-    "C","D","T","R","LED","C-dam","R-dam","txtR","txtC","txtD","D-dam","Pot","Con","Xtal","IC"
+    "C","D","T","R","LED","C-dam","R-dam","txtR","txtC","txtD","D-dam","Pot","Con","Xtal","IC","L"
 };
 
 /* 判断是否缺损类 (Cap-dam=5, Res-dam=6, Diode-dam=10) */
@@ -115,8 +116,7 @@ static void update_component_counts(const rknn_detection_t *dets, int n, int img
         if (cid < 0 || cid >= CLS_COUNT) continue;
         if (dets[i].confidence < DET_CONF_MIN) continue;
         /* 文字类别不参与元件计数, 由 detect_text_filter 单独处理 */
-        if (cid == CLS_TRANSISTOR) continue;
-        if (cid == CLS_TRANSISTOR) continue;
+        if (cid == CLS_POT || cid == CLS_IC) continue;
         raw[cid] += 1.0f;
     }
 
@@ -174,13 +174,13 @@ static void update_component_counts(const rknn_detection_t *dets, int n, int img
 }
 
 /* ---- 对外 API: 获取计数结果 (线程安全) ---- */
-void cv_branch_get_component_result(int counts[15], int *text_filter,
+void cv_branch_get_component_result(int counts[16], int *text_filter,
                                      int *has_damaged, int *has_unknown)
 {
     pthread_mutex_lock(&g_cc.lock);
 
     /* 直接返回原始模型计数 (12类) */
-    memcpy(counts, g_cc.stable_counts, sizeof(int) * 15);
+    memcpy(counts, g_cc.stable_counts, sizeof(int) * 16);
 
     if (text_filter) *text_filter = g_cc.text_filter;
     if (has_damaged) *has_damaged = g_cc.has_damaged;
@@ -407,14 +407,16 @@ static void draw_detections(cv::Mat &mat, rknn_result_t *rknn_res)
         cv::Scalar(255,100,  0), //12 Connecter   天蓝
         cv::Scalar(255,255,  0), //13 Xtal        青
         cv::Scalar(200,200,  0), //14 IC          浅青
+        cv::Scalar(0,200,200),   //15 Inductor    靛青
     };
     const int n_colors = sizeof(colors) / sizeof(colors[0]);
 
     for (int i = 0; i < rknn_res->count && i < 64; i++) {
         rknn_detection_t *d = &rknn_res->detections[i];
         int cid = d->class_id;
+        int is_unknown = (cid < 0);
         if (cid < 0 || cid >= n_colors) cid = CLS_TRANSISTOR;
-        cv::Scalar color = colors[cid];
+        cv::Scalar color = is_unknown ? cv::Scalar(0,0,255) : colors[cid];
 
         /* 文字类别用细框 */
         if (cid >= CLS_TEXT_R && cid <= CLS_TEXT_D) {
@@ -423,8 +425,8 @@ static void draw_detections(cv::Mat &mat, rknn_result_t *rknn_res)
                           cv::Point(d->x + d->w, d->y + d->h),
                           color, 1);
         }
-        /* 缺损类用虚线框 */
-        else if (is_damaged_cls(cid)) {
+        /* 缺损/未知用虚线框 */
+        else if (is_damaged_cls(cid) || is_unknown) {
             int thickness = 2;
             int dash_len = 8;
             /* 简化: 用多个短线段近似虚线 (OpenCV 无原生虚线) */
@@ -456,7 +458,9 @@ static void draw_detections(cv::Mat &mat, rknn_result_t *rknn_res)
 
         /* 标签 + 置信度 */
         char label[128];
-        const char *name = (cid >= 0 && cid < CLS_COUNT) ? g_class_names[cid] : "?";
+        const char *name;
+        if (is_unknown) name = "UNK";
+        else name = (cid >= 0 && cid < CLS_COUNT) ? g_class_names[cid] : "?";
         snprintf(label, sizeof(label), "%s %.2f", name, d->confidence);
         cv::putText(mat, label,
                     cv::Point(d->x, d->y - 5),
@@ -520,12 +524,16 @@ static void process_one_frame_cv(const cv_frame_t *frame)
                     if (cid == CLS_TRANSISTOR) continue;
                     cv::Rect kr(rknn_res.detections[j].x, rknn_res.detections[j].y,
                                 rknn_res.detections[j].w, rknn_res.detections[j].h);
-                    int dw = kr.width*20/100, dh = kr.height*20/100;
+                    int dw = kr.width*30/100, dh = kr.height*30/100;
                     kr.x -= dw; kr.width += dw*2;
                     kr.y -= dh; kr.height += dh*2;
                     cv::Rect inter = r & kr;
-                    if (inter.area() > 0 && (float)inter.area()/r.area() >= 0.50f)
-                        { known = true; break; }
+                    if (inter.area() > 0) {
+                        /* 双向检查: 轮廓在框内 或 框在轮廓内 */
+                        float ov_r = (float)inter.area() / (float)(r.area() + 1);
+                        float ov_k = (float)inter.area() / (float)(kr.area() + 1);
+                        if (ov_r >= 0.40f || ov_k >= 0.40f) { known = true; break; }
+                    }
                 }
                 if (known) continue;
                 int idx = rknn_res.count + unk_cnt;
