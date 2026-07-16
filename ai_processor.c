@@ -520,20 +520,15 @@ static void process_one_frame_cv(const cv_frame_t *frame)
                 bool known = false;
                 for (int j = 0; j < rknn_res.count; j++) {
                     int cid = rknn_res.detections[j].class_id;
-                    if (cid == CLS_TRANSISTOR) continue;
-                    if (cid == CLS_TRANSISTOR) continue;
+                    if (cid >= CLS_TEXT_R && cid <= CLS_TEXT_D) continue;
+                    if (cid == CLS_POT || cid == CLS_IC) continue;
                     cv::Rect kr(rknn_res.detections[j].x, rknn_res.detections[j].y,
                                 rknn_res.detections[j].w, rknn_res.detections[j].h);
-                    int dw = kr.width*30/100, dh = kr.height*30/100;
+                    int dw = kr.width*20/100, dh = kr.height*20/100;
                     kr.x -= dw; kr.width += dw*2;
                     kr.y -= dh; kr.height += dh*2;
                     cv::Rect inter = r & kr;
-                    if (inter.area() > 0) {
-                        /* 双向检查: 轮廓在框内 或 框在轮廓内 */
-                        float ov_r = (float)inter.area() / (float)(r.area() + 1);
-                        float ov_k = (float)inter.area() / (float)(kr.area() + 1);
-                        if (ov_r >= 0.40f || ov_k >= 0.40f) { known = true; break; }
-                    }
+                    if (inter.area() > 0) { known = true; break; }  /* 有任何重叠→已知 */
                 }
                 if (known) continue;
                 int idx = rknn_res.count + unk_cnt;
