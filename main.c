@@ -25,10 +25,11 @@
 #define CAP_FPS          30
 #define H264_BITRATE     4000000
 #define QUEUE_SIZE       4
-#define MODEL_PATH       "/userdata/best7-i8.rknn"
+#define MODEL_PATH       "/userdata/best1-fp16.rknn"
 
 static volatile int running = 1;
-static int filter_override = -1; /* 语音命令设置的过滤 */
+static int filter_override = -1;
+static int auto_mode = 1; /* 1=自动播报 0=手动 */ /* 语音命令设置的过滤 */
 static volatile int g_first_valid_frame = 0;
 static pthread_mutex_t g_start_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  g_start_cond = PTHREAD_COND_INITIALIZER;
@@ -129,6 +130,7 @@ static void on_ai_result(const cv_result_t *result, void *user_data){(void)user_
 static void sig_handler(int sig){(void)sig;running=0;}
 
 int main(void){
+    system("amixer sset Master 100% > /dev/null 2>&1");
     printf("=== RV1126B Component Recognition System ===\n");
     signal(SIGTERM,sig_handler);signal(SIGINT,sig_handler);
 
@@ -169,15 +171,19 @@ int main(void){
 
     int64_t tick=0;
     while(running){
-        for(int i=0;i<50&&running;i++){usleep(20000);  /* 50Hz 按键轮询, 配合消抖状态机 */
+        for(int i=0;i<100&&running;i++){usleep(10000);  /* 100Hz 按键轮询, 配合消抖状态机 */
             int btn=button_read(),key=button_key();
             if(btn==BTN_SHORT)printf("[BTN-EVT] key=%d\n",key);
 
             /* ---- JUDGE 播报 (按键13 或 语音命令自动触发) ---- */
             int do_judge = 0;
 
-            /* 按键"0": 立即 JUDGE 播报 (key 13 = 0x5D = 第4行第2列) */
-            if(btn==BTN_SHORT && key==13){ do_judge = 1; printf("[BTN] JUDGE trigger\n"); }
+            /* 按键"0": 手动 JUDGE 播报 (key 13 = 0x5D = 第4行第2列, 仅手动模式) */
+            if(btn==BTN_SHORT && key==13 && !auto_mode){ do_judge = 1; printf("[BTN] JUDGE trigger\n"); }
+
+            /* 按键12: 切换自动/手动模式 */
+            if(btn==BTN_SHORT && key==12){ auto_mode = !auto_mode;
+                printf("[BTN] mode=%s\n", auto_mode?"AUTO":"MANUAL"); }
 
             /* 按键"2": 语音命令 → 自动 JUDGE (key 1 = 0x45 = 第1行第2列) */
             if(btn==BTN_SHORT && key==1 && stt_ok){
@@ -229,8 +235,12 @@ int main(void){
             }
 
             /* 执行 JUDGE 播报: UNKNOWN > TEXT > DAMAGED > GENERAL */
+            /* 自动模式: 每1秒自动JUDGE (100Hz × 10ms = 100次) */
+            static int auto_cnt=0;
+            if(auto_mode && ++auto_cnt%100==0){ do_judge = 1; printf("[AUTO] trigger cnt=%d\n", auto_cnt); }
+
             if(do_judge){
-                int c[15],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);
+                int c[16],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);
                 int tf = (filter_override>=0) ? filter_override : f;
 
                 if(tf >= 0 && tf <= 7){ /* 过滤模式 — 最高优先级 */
@@ -251,12 +261,13 @@ int main(void){
                 filter_override = -1;
                 printf("[MAIN] → WAIT\n");
                 /* 立即恢复计数页 */
-                { int c[15],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u); }
+                { int c[16],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u); }
             }
             if(stt_ok)stt_get_text();  /* 清除残留STT文本 */
             /* TFT 5Hz刷新 (每200ms) */
             static int tft_cnt=0;
-            if(++tft_cnt%5==0){int c[15],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
+            if(++tft_cnt%10==0){int c[16],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);tft_ui_update(c,f,d,u);}
+
         }
         tick++;
         if(tick%5==0){

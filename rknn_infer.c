@@ -45,12 +45,12 @@ static const float CONF_THRESH_PER_CLASS[16] = {
     0.30f,  /* 2: Transistor */
     0.30f,  /* 3: Resister */
     0.40f,  /* 4: LED */
-    0.25f,  /* 5: Capacitor-damage */
-    0.25f,  /* 6: Resister-damage */
+    0.15f,  /* 5: Capacitor-damage */
+    0.15f,  /* 6: Resister-damage */
     0.25f,  /* 7: dianzu */
     0.25f,  /* 8: dianrong */
     0.25f,  /* 9: erjiguan */
-    0.25f,  /*10: Diode-damage */
+    0.15f,  /*10: Diode-damage */
     0.30f,  /*11: Pot */
     0.30f,  /*12: Connecter */
     0.30f,  /*13: Xtal */

@@ -9,8 +9,9 @@ CXX = aarch64-none-linux-gnu-g++
 TARGET = component_ai
 
 # 源文件
-SRCS = main.c capture.c oled.c font.c oled_display.c voice_service.c \
-       ai_processor.c rknn_infer.c
+SRCS = main.c capture.c button.c voice_service.c stt_service.c \
+       ai_processor.c rknn_infer.c tft_display.c tft_ui.c lcd.c \
+       rtsp_stream.c rtsp_service.c
 OBJS = $(SRCS:.c=.o)
 
 # OpenCV 4.x 交叉编译 (取消注释以启用)
