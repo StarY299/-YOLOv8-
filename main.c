@@ -25,7 +25,7 @@
 #define CAP_FPS          30
 #define H264_BITRATE     4000000
 #define QUEUE_SIZE       4
-#define MODEL_PATH       "/userdata/best6-i8.rknn"
+#define MODEL_PATH       "/userdata/best7-i8.rknn"
 
 static volatile int running = 1;
 static int filter_override = -1; /* 语音命令设置的过滤 */

@@ -671,6 +671,12 @@ out_loop: ;
     }
     n_keep = new_n;
 
+    /* Pot(11)/IC(14) 转未知 */
+    for (int i = 0; i < n_keep; i++) {
+        if (candidates[i].class_id == 11 || candidates[i].class_id == 14)
+            candidates[i].class_id = -1;
+    }
+
     /* ---- 7. 填充结果 ---- */
     result->count = n_keep;
     result->detections = (rknn_detection_t *)calloc(n_keep, sizeof(rknn_detection_t));
