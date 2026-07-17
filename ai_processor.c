@@ -528,8 +528,72 @@ static void process_one_frame_cv(const cv_frame_t *frame)
                     kr.x -= dw; kr.width += dw*2;
                     kr.y -= dh; kr.height += dh*2;
                     cv::Rect inter = r & kr;
-                    if (inter.area() > 0) { known = true; break; }  /* 有任何重叠→已知 */
+                    if (inter.area() > 0) { known = true; break; }  /* IoU>0→已知, 绝不判未知 */
                 }
+
+                /* 无重叠的候选: 用边缘Hu矩匹配已知库做二次验证 */
+                if (!known) {
+                    static std::vector<std::vector<double>> edge_lib; /* Hu矩库 */
+                    static int edge_lib_init = 0;
+                    if (!edge_lib_init) { edge_lib.reserve(50); edge_lib_init = 1; }
+
+                    /* 更新边缘库: 从高置信度YOLO框中提取Canny边缘Hu矩 */
+                    {
+                        cv::Mat gray_full;
+                        cv::cvtColor(mat_full, gray_full, cv::COLOR_BGR2GRAY);
+                        cv::Mat edges_full;
+                        cv::Canny(gray_full, edges_full, 50, 150);
+                        for (int j = 0; j < rknn_res.count; j++) {
+                            if (rknn_res.detections[j].confidence < 0.50f) continue;
+                            int cid = rknn_res.detections[j].class_id;
+                            if (cid < 0 || cid >= CLS_TEXT_R) continue;
+                            if (cid == CLS_POT || cid == CLS_IC) continue;
+                            cv::Rect box(rknn_res.detections[j].x, rknn_res.detections[j].y,
+                                        rknn_res.detections[j].w, rknn_res.detections[j].h);
+                            cv::Mat roi = edges_full(box & cv::Rect(0,0,mat_full.cols,mat_full.rows));
+                            std::vector<std::vector<cv::Point>> ec;
+                            cv::findContours(roi, ec, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+                            for (auto &c : ec) {
+                                if (cv::contourArea(c) < 200) continue;
+                                std::vector<double> hu(7);
+                                cv::HuMoments(cv::moments(c), hu);
+                                /* 去重: 检查是否已有相似Hu矩 */
+                                bool dup = false;
+                                for (auto &h : edge_lib) {
+                                    double d = cv::matchShapes(hu, h, cv::CONTOURS_MATCH_I2, 0);
+                                    if (d < 0.02) { dup = true; break; }
+                                }
+                                if (!dup && edge_lib.size() < 50) edge_lib.push_back(hu);
+                            }
+                        }
+                    }
+
+                    /* 比对候选轮廓的边缘Hu矩与已知库 */
+                    if (!edge_lib.empty()) {
+                        cv::Mat gray_full2;
+                        cv::cvtColor(mat_full, gray_full2, cv::COLOR_BGR2GRAY);
+                        cv::Mat edges_full2;
+                        cv::Canny(gray_full2, edges_full2, 50, 150);
+                        cv::Mat roi_edge = edges_full2(r & cv::Rect(0,0,mat_full.cols,mat_full.rows));
+                        std::vector<std::vector<cv::Point>> ec2;
+                        cv::findContours(roi_edge, ec2, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+                        bool edge_matched = false;
+                        for (auto &c2 : ec2) {
+                            if (cv::contourArea(c2) < 200) continue;
+                            std::vector<double> hu2(7);
+                            cv::HuMoments(cv::moments(c2), hu2);
+                            for (auto &h : edge_lib) {
+                                if (cv::matchShapes(hu2, h, cv::CONTOURS_MATCH_I2, 0) < 0.30) {
+                                    edge_matched = true; break;
+                                }
+                            }
+                            if (edge_matched) break;
+                        }
+                        if (edge_matched) known = true;  /* 边缘匹配→标记为已知 */
+                    }
+                }
+
                 if (known) continue;
                 int idx = rknn_res.count + unk_cnt;
                 if (idx >= 52) break;

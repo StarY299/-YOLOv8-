@@ -648,6 +648,29 @@ out_loop: ;
     /* ---- 6. NMS ---- */
     int n_keep = nms(candidates, n_cand, NMS_THRESHOLD);
 
+    /* ---- 6.5 跨类别去重: IoU>0.70的两框保留置信度高的 ---- */
+    for (int i = 0; i < n_keep; i++) {
+        if (candidates[i].conf <= 0) continue;
+        for (int j = i + 1; j < n_keep; j++) {
+            if (candidates[j].conf <= 0) continue;
+            float iou_val = iou(&candidates[i], &candidates[j]);
+            if (iou_val > 0.70f) {
+                /* 剔除置信度低的 */
+                if (candidates[i].conf >= candidates[j].conf)
+                    candidates[j].conf = -1;  /* 标记删除 */
+                else
+                    candidates[i].conf = -1;
+            }
+        }
+    }
+    /* 压缩: 删除标记为-1的 */
+    int new_n = 0;
+    for (int i = 0; i < n_keep; i++) {
+        if (candidates[i].conf > 0)
+            candidates[new_n++] = candidates[i];
+    }
+    n_keep = new_n;
+
     /* ---- 7. 填充结果 ---- */
     result->count = n_keep;
     result->detections = (rknn_detection_t *)calloc(n_keep, sizeof(rknn_detection_t));
