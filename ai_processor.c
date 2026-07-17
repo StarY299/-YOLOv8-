@@ -537,7 +537,7 @@ static void process_one_frame_cv(const cv_frame_t *frame)
             int unk_cnt = yolo_unk;  /* 从YOLO未知开始计数 */
             for (size_t i = 0; i < contours.size() && unk_cnt < 32; i++) {
                 cv::Rect r = cv::boundingRect(contours[i]);
-                if (r.width*r.height < 400 || r.width*r.height > 40000) continue;
+                if (r.width*r.height < 800 || r.width*r.height > 30000) continue;
                 bool known = false;
                 for (int j = 0; j < rknn_res.count; j++) {
                     int cid = rknn_res.detections[j].class_id;
@@ -573,17 +573,9 @@ static void process_one_frame_cv(const cv_frame_t *frame)
             unk_idx = (unk_idx+1) % UNK_WINDOW;
             static float unk_ema = 0.0f;
             unk_ema = unk_ema * 0.7f + (float)unk_cnt * 0.3f;
-            int unk_stable = (int)(unk_ema + 0.5f);
-            /* unk_cnt 已含YOLO未知+CV未知 */
-            unk_win_cnt -= unk_hist[unk_idx];
-            unk_hist[unk_idx] = (unk_cnt > 0) ? 1 : 0;
-            unk_win_cnt += unk_hist[unk_idx];
-            unk_idx = (unk_idx + 1) % UNK_WINDOW;
-            static float unk_ema2 = 0.0f;
-            unk_ema2 = unk_ema2 * 0.7f + (float)unk_cnt * 0.3f;
-            int total_stable = (int)(unk_ema2 + 0.5f);
+            int total_stable = (int)(unk_ema + 0.5f);
             pthread_mutex_lock(&g_cc.lock);
-            g_cc.has_unknown = (unk_win_cnt > UNK_WINDOW*20/100) ? total_stable : 0;
+            g_cc.has_unknown = (unk_win_cnt > UNK_WINDOW*30/100) ? total_stable : 0;
             pthread_mutex_unlock(&g_cc.lock);
         }
 

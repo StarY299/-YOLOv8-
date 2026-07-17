@@ -28,8 +28,7 @@
 #define MODEL_PATH       "/userdata/best1-fp16.rknn"
 
 static volatile int running = 1;
-static int filter_override = -1;
-static int auto_mode = 1; /* 1=自动播报 0=手动 */ /* 语音命令设置的过滤 */
+static int filter_override = -1; /* 语音命令设置的过滤 */
 static volatile int g_first_valid_frame = 0;
 static pthread_mutex_t g_start_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  g_start_cond = PTHREAD_COND_INITIALIZER;
@@ -82,7 +81,6 @@ static void *ai_feed_thread(void *arg){(void)arg;
                    "/userdata/mediamtx /userdata/mediamtx.yml &");
         }
         empty_streak = 0;
-
 
         /* 更新标注帧缓存 */
         {
@@ -178,12 +176,8 @@ int main(void){
             /* ---- JUDGE 播报 (按键13 或 语音命令自动触发) ---- */
             int do_judge = 0;
 
-            /* 按键"0": 手动 JUDGE 播报 (key 13 = 0x5D = 第4行第2列, 仅手动模式) */
-            if(btn==BTN_SHORT && key==13 && !auto_mode){ do_judge = 1; printf("[BTN] JUDGE trigger\n"); }
-
-            /* 按键12: 切换自动/手动模式 */
-            if(btn==BTN_SHORT && key==12){ auto_mode = !auto_mode;
-                printf("[BTN] mode=%s\n", auto_mode?"AUTO":"MANUAL"); }
+            /* 按键"0": JUDGE 播报 (key 13 = 0x5D = 第4行第2列) */
+            if(btn==BTN_SHORT && key==13){ do_judge = 1; printf("[BTN] JUDGE trigger\n"); }
 
             /* 按键"2": 语音命令 → 自动 JUDGE (key 1 = 0x45 = 第1行第2列) */
             if(btn==BTN_SHORT && key==1 && stt_ok){
@@ -235,9 +229,6 @@ int main(void){
             }
 
             /* 执行 JUDGE 播报: UNKNOWN > TEXT > DAMAGED > GENERAL */
-            /* 自动模式: 每1秒自动JUDGE (100Hz × 10ms = 100次) */
-            static int auto_cnt=0;
-            if(auto_mode && ++auto_cnt%100==0){ do_judge = 1; printf("[AUTO] trigger cnt=%d\n", auto_cnt); }
 
             if(do_judge){
                 int c[16],f,d,u;cv_branch_get_component_result(c,&f,&d,&u);
